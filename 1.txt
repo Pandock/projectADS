@@ -1,24 +1,7 @@
-<settings>
-  <proxies>
-    <proxy>
-      <id>corp-https</id>
-      <active>true</active>
-      <protocol>https</protocol>
-      <host>proxy.techpark.local</host>
-      <port>8080</port>
-      <username>user_1</username> <!-- или TECHPARK\\user_1 -->
-      <password>pass_1</password>
-      <nonProxyHosts>localhost|127.0.0.1|*.techpark.local|10.*|192.168.*|172.16.*</nonProxyHosts>
-    </proxy>
-    <proxy>
-      <id>corp-http</id>
-      <active>true</active>
-      <protocol>http</protocol>
-      <host>proxy.techpark.local</host>
-      <port>8080</port>
-      <username>user_1</username> <!-- или TECHPARK\\user_1 -->
-      <password>pass_1</password>
-      <nonProxyHosts>localhost|127.0.0.1|*.techpark.local|10.*|192.168.*|172.16.*</nonProxyHosts>
-    </proxy>
-  </proxies>
-</settings>
+export MAVEN_OPTS="
+-Dhttp.proxyHost=proxy.techpark.local -Dhttp.proxyPort=8080 \
+-Dhttp.proxyUser=user_1 -Dhttp.proxyPassword=pass_1 \
+-Dhttps.proxyHost=proxy.techpark.local -Dhttps.proxyPort=8080 \
+-Dhttps.proxyUser=user_1 -Dhttps.proxyPassword=pass_1 \
+-Dhttp.nonProxyHosts='localhost|127.0.0.1|*.techpark.local|10.*|192.168.*|172.16.*' \
+-Dmaven.wagon.http.preemptive=true"
