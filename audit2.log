@@ -1,0 +1,115 @@
+Oct 06, 2025 10:03:50 AM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=mikhalev.v, error=
+
+Oct 06, 2025 10:03:50 AM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=mikhalev.v, error=
+
+Oct 06, 2025 10:03:50 AM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=mikhalev.v, error=
+
+Oct 06, 2025 10:03:50 AM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCreated
+INFO: [[CREATE QUERY]]: source=cedrusdata-ui, origUser=mikhalev.v, user=mikhalev.v, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.56.177, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0, queryID=20251006_070350_00000_re7sm, tables=[], query=
+  select
+    table_cat
+  from
+    system.jdbc.catalogs
+  order by
+    table_cat asc
+  
+
+Oct 06, 2025 10:03:51 AM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCompleted
+INFO: [[COMPLETE QUERY]]:source=cedrusdata-ui, origUser=mikhalev.v, user=mikhalev.v, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.56.177, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0, queryID=20251006_070350_00000_re7sm, state=FINISHED
+
+Oct 06, 2025 12:18:26 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=, error=Unauthorized
+
+Oct 06, 2025 12:18:26 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=, error=JWT expired 347591982 milliseconds ago at 2025-10-02T08:45:15.000Z. Current time: 2025-10-06T09:18:26.982Z. Allowed clock skew: 0 milliseconds.
+
+Oct 06, 2025 12:23:31 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=tarasov.sv, error=
+
+Oct 06, 2025 12:23:35 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGOUT, user=tarasov.sv, error=
+
+Oct 06, 2025 12:23:45 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=, error=Unauthorized
+
+Oct 06, 2025 12:24:15 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=tarasov.sv, error=
+
+Oct 06, 2025 12:24:15 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:24:15 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:24:15 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCreated
+INFO: [[CREATE QUERY]]: source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092415_00001_re7sm, tables=[], query=
+  select
+    table_cat
+  from
+    system.jdbc.catalogs
+  order by
+    table_cat asc
+  
+
+Oct 06, 2025 12:24:16 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCompleted
+INFO: [[COMPLETE QUERY]]:source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092415_00001_re7sm, state=FINISHED
+
+Oct 06, 2025 12:24:28 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGOUT, user=tarasov.sv, error=
+
+Oct 06, 2025 12:24:42 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=, error=Unauthorized
+
+Oct 06, 2025 12:25:19 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=WEB_UI, type=LOGIN, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:19 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:20 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:20 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCreated
+INFO: [[CREATE QUERY]]: source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092520_00002_re7sm, tables=[], query=
+  select
+    table_cat
+  from
+    system.jdbc.catalogs
+  order by
+    table_cat asc
+  
+
+Oct 06, 2025 12:25:20 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCompleted
+INFO: [[COMPLETE QUERY]]:source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092520_00002_re7sm, state=FINISHED
+
+Oct 06, 2025 12:25:24 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:33 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:33 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCreated
+INFO: [[CREATE QUERY]]: source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092533_00003_re7sm, tables=[], query=
+  select
+    table_cat
+  from
+    system.jdbc.catalogs
+  order by
+    table_cat asc
+  
+
+Oct 06, 2025 12:25:33 PM ru.cedrusdata.spi.CedrusdataAuditEventListener queryCompleted
+INFO: [[COMPLETE QUERY]]:source=cedrusdata-ui, origUser=tarasov.sv, user=tarasov.sv, type=Optional[SELECT], serverAddress=10-50-62-20.ip, clientInfo=, clientAddress=10.50.62.19, userAgent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.35, queryID=20251006_092533_00003_re7sm, state=FINISHED
+
+Oct 06, 2025 12:25:37 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:25:49 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
+Oct 06, 2025 12:26:02 PM ru.cedrusdata.spi.CedrusdataAuditEventListener cedrusDataAuthenticationEvent
+INFO: [[AUTH]]: source=TRINO_PROTOCOL, type=LOGIN_STATELESS, user=tarasov.sv, error=
+
