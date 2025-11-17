@@ -45,3 +45,51 @@ Source: https://SPB99-MNT-AP01T/grafana/v116/alerting/grafana/af4daitur8oaof/vie
 Silence: https://SPB99-MNT-AP01T/grafana/v116/alerting/silence/new?alertmanager=grafana&matcher=alertname%3Dssl_expiracy_alert+%28test%29&matcher=grafana_folder%3DSystem+alerts&matcher=host%3Dspb99-wdq-ap01t&matcher=instance%3Dspb99-mnt-ap01t%3A10000&matcher=job%3Dnode-exporter&matcher=land%3Dtest&matcher=port%3D443&matcher=product%3DDWH&matcher=server%3Dspb99-mnt-ap01t&orgId=1
 Dashboard: https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000
 Panel: https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000&viewPanel=1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+{{ if gt (len .Alerts.Firing) 0 -}}
+{{ range .Alerts.Firing -}}
+Истекает сертификат на сервере {{ index .Labels "host" }}
+{{- with (index .Values "B") }}
+Осталось {{ printf "%.0f" . }} дня
+{{- else }}
+Осталось [нет значения]
+{{- end }}
+Продукт {{ index .Labels "product" }}
+{{ if .DashboardURL }}Ссылка на дашборд: {{ .DashboardURL }}{{ end }}
+{{ if .PanelURL }}Ссылка на панель: {{ .PanelURL }}{{ end }}
+
+{{ end -}}
+{{ end -}}
+
+{{ if gt (len .Alerts.Resolved) 0 -}}
+{{ range .Alerts.Resolved -}}
+Проблема закрыта на сервере {{ index .Labels "host" }}
+Продукт {{ index .Labels "product" }}
+{{ if .DashboardURL }}Ссылка на дашборд: {{ .DashboardURL }}{{ end }}
+{{ if .PanelURL }}Ссылка на панель: {{ .PanelURL }}{{ end }}
+
+{{ end -}}
+{{ end -}}
