@@ -1,253 +1,47 @@
-{{ define "__alertmanager" }}Alertmanager{{ end }}
+{{ . }}
 
-{{ define "__alertmanagerURL" }}{{.ExternalURL}}/#/alerts?receiver={{.Receiver | urlquery}}{{ end }}
+{resolved alertname=ssl_expiracy_alert (test), grafana_folder=System alerts, host=spb99-wdq-ap01t, instance=spb99-mnt-ap01t:10000, job=node-exporter, land=test, port=443, product=DWH, server=spb99-mnt-ap01t  2025-11-17 09:06:20 +0300 +0300 2025-11-17 14:34:20 +0300 +0300 https://SPB99-MNT-AP01T/grafana/v116/alerting/grafana/af4daitur8oaof/view?orgId=1 dc17a356c3ff3c8f https://SPB99-MNT-AP01T/grafana/v116/alerting/silence/new?alertmanager=grafana&matcher=alertname%3Dssl_expiracy_alert+%28test%29&matcher=grafana_folder%3DSystem+alerts&matcher=host%3Dspb99-wdq-ap01t&matcher=instance%3Dspb99-mnt-ap01t%3A10000&matcher=job%3Dnode-exporter&matcher=land%3Dtest&matcher=port%3D443&matcher=product%3DDWH&matcher=server%3Dspb99-mnt-ap01t&orgId=1 https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000 https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000&viewPanel=1 map[B:22 C:1] [ var='B' labels={__name__=go_threads, instance=host.docker.internal:3000, job=grafana} value=22 ], [ var='C' labels={__name__=go_threads, instance=host.docker.internal:3000, job=grafana} value=1 ]  }
 
-{{ define "__description" }}{{ end }}
 
-{{ define "__subject" }}[{{.Status | toUpper}}{{if eq .Status "firing"}}:{{.Alerts.Firing | len}}{{if gt (.Alerts.Resolved | len) 0}}, RESOLVED:{{.Alerts.Resolved | len}}{{end}}{{end}}] {{.GroupLabels.SortedPairs.Values | join " "}} {{if gt (len .CommonLabels) (len .GroupLabels)}}({{with .CommonLabels.Remove .GroupLabels.Names}}{{.Values | join " "}}{{end}}){{end}}{{ end }}
 
-{{ define "__teams_text_alert_list" }}{{range .}}
-Value: {{template "__text_values_list" .}}
+Value: {{ template "__text_values_list.copy" . }}
 Labels:
-{{range .Labels.SortedPairs}} - {{.Name}} = {{.Value}}
-{{end}}
-Annotations:
-{{range .Annotations.SortedPairs}} - {{.Name}} = {{.Value}}
-{{end}}
-{{if gt (len .GeneratorURL) 0}}Source: [{{.GeneratorURL}}]({{.GeneratorURL}})
+{{ range .Labels.SortedPairs }} - {{ .Name }} = {{ .Value }}
+{{ end }}
+{{ if gt (len .GeneratorURL) 0 }}Source: {{ .GeneratorURL }}
+{{ end }}{{ if gt (len .SilenceURL) 0 }}Silence: {{ .SilenceURL }}
+{{ end }}{{ if gt (len .DashboardURL) 0 }}Dashboard: {{ .DashboardURL }}
+{{ end }}{{ if gt (len .PanelURL) 0 }}Panel: {{ .PanelURL }}
+{{ end }}{{ end }}{{ end }}
 
-{{end}}{{if gt (len .SilenceURL) 0}}Silence: [{{.SilenceURL}}]({{.SilenceURL}})
+{{ define "__text_values_list.copy" }}{{ if len .Values }}{{ $first := true }}
+{{ range $refID, $value := .Values -}}
+{{ if $first }}{{ $first = false }}{{ else }}, {{ end }}
+{{ $refID }}={{ $value }}
+{{ end -}}
+{{ else }}[no value]{{ end }}{{ end }}
 
-{{end}}{{if gt (len .DashboardURL) 0}}Dashboard: [{{.DashboardURL}}]({{.DashboardURL}})
 
-{{end}}{{if gt (len .PanelURL) 0}}Panel: [{{.PanelURL}}]({{.PanelURL}})
 
-{{end}}
-{{end}}{{ end }}
 
-{{ define "__text_alert_list" }}{{range .}}
-Value: {{template "__text_values_list" .}}
+Value: 
+
+B=22
+, 
+C=1
+
 Labels:
-QWEQWEQWEQWEQWE
-{{range .Labels.SortedPairs}} - {{.Name}} = {{.Value}}
-{{end}}Annotations:
-{{range .Annotations.SortedPairs}} - {{.Name}} = {{.Value}}
-{{end}}{{if gt (len .GeneratorURL) 0}}Source: {{.GeneratorURL}}
-{{end}}{{if gt (len .SilenceURL) 0}}Silence: {{.SilenceURL}}
-{{end}}{{if gt (len .DashboardURL) 0}}Dashboard: {{.DashboardURL}}
-{{end}}{{if gt (len .PanelURL) 0}}Panel: {{.PanelURL}}
-{{end}}{{end}}{{ end }}
+ - alertname = ssl_expiracy_alert (test)
+ - grafana_folder = System alerts
+ - host = spb99-wdq-ap01t
+ - instance = spb99-mnt-ap01t:10000
+ - job = node-exporter
+ - land = test
+ - port = 443
+ - product = DWH
+ - server = spb99-mnt-ap01t
 
-{{ define "__text_alert_list_markdown" }}{{range .}}
-Labels:
-{{range .Labels.SortedPairs}}  - {{.Name}} = {{.Value}}
-{{end}}
-Annotations:
-{{range .Annotations.SortedPairs}}  - {{.Name}} = {{.Value}}
-{{end}}
-Source: {{.GeneratorURL}}
-{{end}}
-{{ end }}
-
-{{ define "__text_values_list" }}{{if len .Values}}{{$first := true}}{{range $refID, $value := .Values}}{{if $first}}{{$first = false}}{{else}}, {{end}}{{$refID}}={{$value}}{{end}}{{else}}[no value]{{end}}{{ end }}
-
-{{ define "default.message" }}{{if gt (len .Alerts.Firing) 0}}**Firing**
-{{template "__text_alert_list" .Alerts.Firing}}{{if gt (len .Alerts.Resolved) 0}}
-
-{{end}}{{end}}{{if gt (len .Alerts.Resolved) 0}}**Resolved**
-{{template "__text_alert_list" .Alerts.Resolved}}{{end}}{{ end }}
-
-{{ define "default.title" }}{{template "__subject" .}}{{ end }}
-
-{{ define "discord.default.message" }}
-{{if gt (len .Alerts.Firing) 0}}
-Alerts Firing:
-{{template "__text_alert_list" .Alerts.Firing}}
-{{end}}
-{{if gt (len .Alerts.Resolved) 0}}
-Alerts Resolved:
-{{template "__text_alert_list" .Alerts.Resolved}}
-{{end}}
-{{ end }}
-
-{{ define "discord.default.title" }}{{template "__subject" .}}{{ end }}
-
-{{ define "email.default.html" }}
-<!--
-Style and HTML derived from https://github.com/mailgun/transactional-email-templates
-
-
-The MIT License (MIT)
-
-Copyright (c) 2014 Mailgun
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
--->
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-<head>
-<meta name="viewport" content="width=device-width">
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>{{template "__subject" .}}</title>
-<style>
-@media only screen and (max-width: 640px) {
-  body {
-    padding: 0 !important;
-  }
-
-  h1,
-h2,
-h3,
-h4 {
-    font-weight: 800 !important;
-    margin: 20px 0 5px !important;
-  }
-
-  h1 {
-    font-size: 22px !important;
-  }
-
-  h2 {
-    font-size: 18px !important;
-  }
-
-  h3 {
-    font-size: 16px !important;
-  }
-
-  .container {
-    padding: 0 !important;
-    width: 100% !important;
-  }
-
-  .content {
-    padding: 0 !important;
-  }
-
-  .content-wrap {
-    padding: 10px !important;
-  }
-
-  .invoice {
-    width: 100% !important;
-  }
-}
-</style>
-</head>
-
-<body itemscope itemtype="https://schema.org/EmailMessage" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: none; height: 100%; line-height: 1.6em; background-color: #f6f6f6; width: 100%;">
-
-<table class="body-wrap" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; background-color: #f6f6f6; width: 100%;" width="100%" bgcolor="#f6f6f6">
-  <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-    <td style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top;" valign="top"></td>
-    <td class="container" width="600" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; display: block; max-width: 600px; margin: 0 auto; clear: both;" valign="top">
-      <div class="content" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; max-width: 600px; margin: 0 auto; display: block; padding: 20px;">
-        <table class="main" width="100%" cellpadding="0" cellspacing="0" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; background-color: #fff; border: 1px solid #e9e9e9; border-radius: 3px;" bgcolor="#fff">
-          <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-            {{if gt (len .Alerts.Firing) 0}}
-            <td class="alert alert-warning" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; vertical-align: top; font-size: 16px; color: #fff; font-weight: 500; padding: 20px; text-align: center; border-radius: 3px 3px 0 0; background-color: #E6522C;" valign="top" align="center" bgcolor="#E6522C">
-              {{.Alerts | len}} alert{{if gt (len .Alerts) 1}}s{{end}} for {{range .GroupLabels.SortedPairs}}
-                {{.Name}}={{.Value}}
-              {{end}}
-            </td>
-            {{else}}
-            <td class="alert alert-good" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; vertical-align: top; font-size: 16px; color: #fff; font-weight: 500; padding: 20px; text-align: center; border-radius: 3px 3px 0 0; background-color: #68B90F;" valign="top" align="center" bgcolor="#68B90F">
-              {{.Alerts | len}} alert{{if gt (len .Alerts) 1}}s{{end}} for {{range .GroupLabels.SortedPairs}}
-                {{.Name}}={{.Value}}
-              {{end}}
-            </td>
-            {{end}}
-          </tr>
-          <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-            <td class="content-wrap" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 30px;" valign="top">
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <a href="{{template "__alertmanagerURL" .}}" class="btn-primary" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; text-decoration: none; color: #FFF; background-color: #348eda; border: solid #348eda; border-width: 10px 20px; line-height: 2em; font-weight: bold; text-align: center; cursor: pointer; display: inline-block; border-radius: 5px; text-transform: capitalize;">View in {{template "__alertmanager" .}}</a>
-                  </td>
-                </tr>
-                {{if gt (len .Alerts.Firing) 0}}
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">[{{.Alerts.Firing | len}}] Firing</strong>
-                  </td>
-                </tr>
-                {{end}}
-                {{range .Alerts.Firing}}
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">Labelssssss</strong><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                    {{range .Labels.SortedPairs}}{{.Name}} = {{.Value}}<br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    {{if gt (len .Annotations) 0}}<strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">Annotations</strong><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    {{range .Annotations.SortedPairs}}{{.Name}} = {{.Value}}<br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    <a href="{{.GeneratorURL}}" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; color: #348eda; text-decoration: underline;">Source</a><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  </td>
-                </tr>
-                {{end}}
-
-                {{if gt (len .Alerts.Resolved) 0}}
-                  {{if gt (len .Alerts.Firing) 0}}
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                    <hr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                    <br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  </td>
-                </tr>
-                  {{end}}
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">[{{.Alerts.Resolved | len}}] Resolved</strong>
-                  </td>
-                </tr>
-                {{end}}
-                {{range .Alerts.Resolved}}
-                <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  <td class="content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top; padding: 0 0 20px;" valign="top">
-                    <strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">Labels</strong><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                    {{range .Labels.SortedPairs}}{{.Name}} = {{.Value}}<br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    {{if gt (len .Annotations) 0}}<strong style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">Annotations</strong><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    {{range .Annotations.SortedPairs}}{{.Name}} = {{.Value}}<br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">{{end}}
-                    <a href="{{.GeneratorURL}}" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; color: #348eda; text-decoration: underline;">Source</a><br style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-                  </td>
-                </tr>
-                {{end}}
-              </table>
-            </td>
-          </tr>
-        </table>
-
-        <div class="footer" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; width: 100%; clear: both; color: #999; padding: 20px;">
-          <table width="100%" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-            <tr style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px;">
-              <td class="aligncenter content-block" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; vertical-align: top; padding: 0 0 20px; text-align: center; color: #999; font-size: 12px;" valign="top" align="center"><a href="{{.ExternalURL}}" style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; text-decoration: underline; color: #999; font-size: 12px;">Sent by {{template "__alertmanager" .}}</a></td>
-            </tr>
-          </table>
-        </div></div>
-    </td>
-    <td style="margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; box-sizing: border-box; font-size: 14px; vertical-align: top;" valign="top"></td>
-  </tr>
-</table>
-
-</body>
-</html>
-
-{{ end }}
-
-{{ define "email.default.subject" }}{{template "__subject" .}}{{ end }}
+Source: https://SPB99-MNT-AP01T/grafana/v116/alerting/grafana/af4daitur8oaof/view?orgId=1
+Silence: https://SPB99-MNT-AP01T/grafana/v116/alerting/silence/new?alertmanager=grafana&matcher=alertname%3Dssl_expiracy_alert+%28test%29&matcher=grafana_folder%3DSystem+alerts&matcher=host%3Dspb99-wdq-ap01t&matcher=instance%3Dspb99-mnt-ap01t%3A10000&matcher=job%3Dnode-exporter&matcher=land%3Dtest&matcher=port%3D443&matcher=product%3DDWH&matcher=server%3Dspb99-mnt-ap01t&orgId=1
+Dashboard: https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000
+Panel: https://SPB99-MNT-AP01T/grafana/v116/d/dashboard_uid?from=1763355980000&orgId=1&to=1763379260000&viewPanel=1
