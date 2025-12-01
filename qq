@@ -118,6 +118,82 @@ SELECT countDistinct(partition_id) FROM system.parts WHERE database='db' AND tab
 
 
 
+ариант A: без join — кто трогает много партиций в одном запросе
+
+Работает даже если в query_log чего‑то не хватает.
+Смотрим по part_log за последний час только события создания новых частей:
+SELECT
+query_id,
+database,
+table,
+countDistinct(partition_id) AS partitions_touched,
+sum(rows) AS rows_written,
+min(event_time) AS first_seen,
+max(event_time) AS last_seen
+FROM system.part_log
+WHERE event_time > now() - INTERVAL 1 HOUR
+AND event_type = 'NEW_PART'
+GROUP BY query_id, database, table
+ORDER BY partitions_touched DESC
+LIMIT 50;
+Вариант B: с привязкой к пользователю (join по query_id)
+
+Аккуратнее с query_kind — в 24.3 его может не быть. Фильтруем по тексту запроса.
+WITH
+(
+SELECT
+query_id,
+any(event_time) AS qtime,
+any(initial_user) AS initial_user,
+any(database) AS q_db,
+any(table) AS q_table
+FROM system.query_log
+WHERE event_time > now() - INTERVAL 2 HOUR
+AND type = 'QueryFinish'
+AND startsWith(lowerUTF8(query), 'insert') -- вместо query_kind
+GROUP BY query_id
+) AS q
+SELECT
+p.query_id,
+q.initial_user,
+p.database,
+p.table,
+countDistinctIf(p.partition_id, p.event_type = 'NEW_PART') AS partitions_touched,
+sumIf(p.rows, p.event_type = 'NEW_PART') AS rows_written,
+min(p.event_time) AS first_seen,
+max(p.event_time) AS last_seen
+FROM system.part_log AS p
+LEFT JOIN q USING (query_id)
+WHERE p.event_time > now() - INTERVAL 1 HOUR
+GROUP BY p.query_id, q.initial_user, p.database, p.table
+ORDER BY partitions_touched DESC
+LIMIT 50;
+Мини‑проверки, если всё равно не взлетает
+
+Значения event_type:
+SELECT DISTINCT toString(event_type) FROM system.part_log ORDER BY 1;
+Убедитесь, что там 'NEW_PART' (не 'NewPart').
+Есть ли строки в part_log:
+SELECT count() FROM system.part_log WHERE event_time > now() - INTERVAL 1 HOUR;
+Есть ли строки в query_log для INSERT:
+SELECT count() FROM system.query_log WHERE event_time > now() - INTERVAL 1 HOUR AND type='QueryFinish' AND startsWith(lowerUTF8(query),'insert');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
