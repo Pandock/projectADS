@@ -40,3 +40,15 @@ make range queries fast). Partitions are intended for data manipulation (DROP PA
  (version 24.3.2.1)
 
 
+
+
+
+
+Найти “виновные” таблицы с избыточным числом партиций:
+SELECT database, table, countDistinct(partition_id) AS partitions, count() AS parts FROM system.parts WHERE active GROUP BY database, table ORDER BY partitions DESC LIMIT 20;
+Посмотреть последние ошибки INSERT с кодом 252:
+SELECT event_time, initial_query_id, query_kind, query, exception_code, exception FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 ORDER BY event_time DESC LIMIT 50;
+Проверить состояние репликаций (если Replicated*):
+SELECT database, table, is_leader, absolute_delay, queue_size, last_queue_update_exception FROM system.replicas ORDER BY queue_size DESC LIMIT 20;
+Корреляция с Keeper:
+SELECT event_type, event_time FROM system.zookeeper_log WHERE event_type IN ('connection_loss','session_expired') ORDER BY event_time DESC LIMIT 100;
