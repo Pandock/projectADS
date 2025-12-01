@@ -70,6 +70,54 @@ SELECT toStartOfMinute(event_time) AS ts, initial_user, database, table, count()
 
 
 
+По факту, на стороне ClickHouse (лучший способ)
+Считаем, сколько партиций затронул каждый конкретный INSERT, по логу частей:
+Показывает “сколько партиций создал/дотронулся этот запрос”.
+Пример (за последний час):
+SELECT
+q.event_time, q.initial_user, q.database, q.table, q.query_id,
+countDistinct(p.partition_id) AS partitions_touched,
+countIf(p.event_type = 'NewPart') AS new_parts,
+sumIf(p.rows, p.event_type = 'NewPart') AS rows_written
+FROM system.query_log AS q
+LEFT JOIN system.part_log AS p
+ON p.query_id = q.query_id
+AND p.database = q.database
+AND p.table = q.table
+AND p.event_time >= q.event_time - INTERVAL 10 MINUTE
+WHERE q.type = 'QueryFinish'
+AND q.query_kind = 'Insert'
+AND q.event_time > now() - INTERVAL 1 HOUR
+GROUP BY q.event_time, q.initial_user, q.database, q.table, q.query_id
+ORDER BY partitions_touched DESC
+LIMIT 50;
+Это даёт прямое “доказательство” по каждому INSERT: “вот ваш запрос, он тронул 137 партиций” — и покажет, кто/когда это сделал.
+Если INSERT был вида INSERT INTO … SELECT … (внутри CH)
+Запустите SELECT‑часть отдельно и посчитайте уникальные значения выражения PARTITION BY:
+Пример при PARTITION BY toYYYYMM(date):
+SELECT countDistinct(toYYYYMM(date))
+FROM <source_tables_and_filters_from_insert>;
+Это покажет, что именно этот источник/фильтр породил >100 разных партиций в одном батче.
+Если источник внешняя пачка (файл/HTTP поток)
+Можно “примерить” партиционирование к этому файлу через table function input(), не вставляя:
+Пример для CSV в stdin, PARTITION BY toYYYYMM(date):
+cat batch.csv | clickhouse-client -q "SELECT countDistinct(toYYYYMM(date)) FROM input('date Date, ...') FORMAT CSV";
+Аналогично для JSONEachRow и т.п., подставив схему.
+Проверка схемы и текущих партиций (контекст)
+Формула PARTITION BY:
+SHOW CREATE TABLE db.table; или
+SELECT partition_key FROM system.tables WHERE database='db' AND name='table';
+Сколько всего партиций сейчас (это не то же самое, что “в одном INSERT”):
+SELECT countDistinct(partition_id) FROM system.parts WHERE database='db' AND table='table' AND active;
+Почему 572 “всего партиций” — не объясняет 252
+
+
+
+
+
+
+
+
 
 
 
