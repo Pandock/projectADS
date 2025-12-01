@@ -60,6 +60,17 @@ SELECT event_time, initial_user, address, database, table, query, exception_code
 
 
 
+Если известна формула PARTITION BY для таблицы (например, toYYYYMM(date)), можно на стороне ClickHouse воспроизвести для примера:
+SELECT countDistinct(toYYYYMM(date)) FROM <их_источник_данных_или_временная_таблица>;
+В качестве прокси‑метрики — частота 252 в query_log у их пользователя/сервиса по времени:
+SELECT toStartOfMinute(event_time) AS ts, initial_user, database, table, count() AS errors FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 GROUP BY ts, initial_user, database, table ORDER BY ts DESC LIMIT 100;
+
+
+
+
+
+
+
 
 
 
