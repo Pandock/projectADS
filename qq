@@ -1,82 +1,42 @@
-spb99akl-dadqm1.gazprom-neft.local :) select * from system.zookeeper where path in ('/clickhouse/task_queue','/clickhouse/task_queue/ddl')
+2025.12.01 07:49:11.521626 [ 3857953 ] {9982f4d3-d7b6-4102-b5b5-35af7e59b2bc} <Error> DynamicQueryHandler: Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is c
+ontrolled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT que
+ries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..10000. Please note, that partitioning is not intended to speed up SELECT queries (ORDER BY key is sufficient to
+make range queries fast). Partitions are intended for data manipulation (DROP PARTITION, etc). (TOO_MANY_PARTS), Stack trace (when copying this message, always include the lines below):
 
-SELECT *
-FROM system.zookeeper
-WHERE path IN ('/clickhouse/task_queue', '/clickhouse/task_queue/ddl')
+0. Poco::Exception::Exception(String const&, int) @ 0x0000000013e21699
+1. DB::Exception::Exception(DB::Exception::MessageMasked&&, int, bool) @ 0x000000000b0fcad7
+2. DB::Exception::Exception<unsigned long&>(int, FormatStringHelperImpl<std::type_identity<unsigned long&>::type>, unsigned long&) @ 0x00000000069b7fd0
+3. DB::MergeTreeDataWriter::splitBlockIntoParts(DB::Block&&, unsigned long, std::shared_ptr<DB::StorageInMemoryMetadata const> const&, std::shared_ptr<DB::Context const>, std::shared_ptr<DB::AsyncInsertInfo>)
+ @ 0x0000000010e26a35
+4. DB::ReplicatedMergeTreeSinkImpl<false>::consume(DB::Chunk) @ 0x0000000010ee905b
+5. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x000000001147df15
+6. void std::__function::__policy_invoker<void ()>::__call_impl<std::__function::__default_alloc_func<DB::ExceptionKeepingTransform::work()::$_1, void ()>>(std::__function::__policy_storage const*) @ 0x000000
+00113c3ea9
+7. DB::runStep(std::function<void ()>, DB::ThreadStatus*, std::atomic<unsigned long>*) @ 0x00000000113c3d30
+8. DB::ExceptionKeepingTransform::work() @ 0x00000000113c373d
+9. DB::ExecutionThreadContext::executeTask() @ 0x000000001119ff93
+10. DB::PipelineExecutor::executeStepImpl(unsigned long, std::atomic<bool>*) @ 0x0000000011196f10
+11. DB::PipelineExecutor::executeStep(std::atomic<bool>*) @ 0x0000000011196aa9
+12. DB::DistributedSink::writeToLocal(DB::Cluster::ShardInfo const&, DB::Block const&, unsigned long) @ 0x0000000010b22bd9
+13. DB::DistributedSink::writeAsyncImpl(DB::Block const&, unsigned long) @ 0x0000000010b1ea24
+14. DB::DistributedSink::consume(DB::Chunk) @ 0x0000000010b1d67c
+15. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x000000001147df15
+16. void std::__function::__policy_invoker<void ()>::__call_impl<std::__function::__default_alloc_func<DB::ExceptionKeepingTransform::work()::$_1, void ()>>(std::__function::__policy_storage const*) @ 0x00000000113c3ea9
+17. DB::runStep(std::function<void ()>, DB::ThreadStatus*, std::atomic<unsigned long>*) @ 0x00000000113c3d30
+18. DB::ExceptionKeepingTransform::work() @ 0x00000000113c373d
+19. DB::ExecutionThreadContext::executeTask() @ 0x000000001119ff93
+20. DB::PipelineExecutor::executeStepImpl(unsigned long, std::atomic<bool>*) @ 0x0000000011196f10
+21. DB::PipelineExecutor::executeImpl(unsigned long, bool) @ 0x00000000111967fd
+22. DB::PipelineExecutor::execute(unsigned long, bool) @ 0x00000000111965e1
+23. DB::CompletedPipelineExecutor::execute() @ 0x000000001119553e
+24. DB::executeQuery(DB::ReadBuffer&, DB::WriteBuffer&, bool, std::shared_ptr<DB::Context>, std::function<void (DB::QueryResultDetails const&)>, DB::QueryFlags, std::optional<DB::FormatSettings> const&, std::function<void (DB::IOutputFormat&)>) @ 0x000000001017ebf8
+25. DB::HTTPHandler::processQuery(DB::HTTPServerRequest&, DB::HTMLForm&, DB::HTTPServerResponse&, DB::HTTPHandler::Output&, std::optional<DB::CurrentThread::QueryScope>&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000110d92ca
+26. DB::HTTPHandler::handleRequest(DB::HTTPServerRequest&, DB::HTTPServerResponse&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000110dcc3d
+27. DB::HTTPServerConnection::run() @ 0x0000000011150508
+28. Poco::Net::TCPServerConnection::start() @ 0x0000000013d3cb27
+29. Poco::Net::TCPServerDispatcher::run() @ 0x0000000013d3d01e
+30. Poco::PooledThread::run() @ 0x0000000013e77f47
+31. Poco::ThreadImpl::runnableEntry(void*) @ 0x0000000013e75a63
+ (version 24.3.2.1)
 
-Query id: e8d0309d-10c8-4eaf-b31a-45217cfce55d
 
-      ┌─name─────────────┬─value──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┬─path───────────────────────┐
-   1. │ query-0033064199 │ version: 5
-query: GRANT ON CLUSTER gpn SELECT ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: bb563f1e-c726-46a5-b9e1-b3dcb6479f1d
- │ /clickhouse/task_queue/ddl │
-   2. │ query-0033064195 │ version: 5
-query: GRANT ON CLUSTER gpn ALTER DATABASE ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: 47d05545-fd4e-4e50-b043-1c4f36802429
- │ /clickhouse/task_queue/ddl │
-   3. │ query-0033064196 │ version: 5
-query: GRANT ON CLUSTER gpn ALTER DELETE ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: a5ced16c-b01b-4d43-8d16-fd8306beaa1e
- │ /clickhouse/task_queue/ddl │
-   4. │ query-0033064197 │ version: 5
-query: GRANT ON CLUSTER gpn ALTER UPDATE ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: 2a1f6455-ab68-404d-a1a2-44728a58f877
- │ /clickhouse/task_queue/ddl │
-   5. │ query-0033064198 │ version: 5
-query: GRANT ON CLUSTER gpn INSERT ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: 855fa6c1-2b4d-479a-a8f1-b84927f7e56b
- │ /clickhouse/task_queue/ddl │
-   6. │ query-0033064191 │ version: 5
-query: GRANT ON CLUSTER gpn ALTER CONSTRAINT ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
-
-0
-initial_query_id: 80efb239-ab8c-44ea-8ebf-5ac1976f7858
- │ /clickhouse/task_queue/ddl │
-   7. │ query-0033064192 │ version: 5
-query: GRANT ON CLUSTER gpn ALTER INDEX ON brd_gpnor_dmt_dmn_newol_ct.* TO `ldap_SPB-GP-DMP-DWH-A-BRD-ADQM-DB-ADM`
-hosts: ['spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9440','spb99akl%2Ddadqm2%2Egazprom%2Dneft%2Elocal:9440']
-initiator: spb99akl%2Ddadqm1%2Egazprom%2Dneft%2Elocal:9000
-settings: max_query_size = 2097152, hsts_max_age = 15678000, use_uncompressed_cache = false, log_queries = true, enable_http_compression = false, http_connection_timeout = 50., http_send_timeout = 50., http_receive_timeout = 50., http_max_uri_size = 10485760, query_profiler_real_time_period_ns = 0, query_profiler_cpu_time_period_ns = 0, max_result_rows = 1000000000, max_execution_time = 43200., max_ast_elements = 1000000, max_expanded_ast_elements = 1000000, max_memory_usage = 32212254720, max_memory_usage_for_user = 32212254720, memory_profiler_step = 0, log_query_threads = true, log_query_views = true, log_comment = '/scripts/adch_sync/tmp/20251128_1258/access/brd/adm.sql', allow_introspection_functions = false, allow_experimental_live_view = true, allow_experimental_window_view = true, allow_experimental_database_materialized_postgresql = true, allow_experimental_hash_functions = true, allow_experimental_object_type = true, allow_experimental_alter_materialized_view_structure = true, allow_experimental_undrop_table_query = true
-tracing: 00000000-0000-0000-0000-000000000000
-0
