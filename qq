@@ -1,208 +1,2621 @@
-2025.12.01 07:49:11.521626 [ 3857953 ] {9982f4d3-d7b6-4102-b5b5-35af7e59b2bc} <Error> DynamicQueryHandler: Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is c
-ontrolled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT que
-ries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..10000. Please note, that partitioning is not intended to speed up SELECT queries (ORDER BY key is sufficient to
-make range queries fast). Partitions are intended for data manipulation (DROP PARTITION, etc). (TOO_MANY_PARTS), Stack trace (when copying this message, always include the lines below):
-
-0. Poco::Exception::Exception(String const&, int) @ 0x0000000013e21699
-1. DB::Exception::Exception(DB::Exception::MessageMasked&&, int, bool) @ 0x000000000b0fcad7
-2. DB::Exception::Exception<unsigned long&>(int, FormatStringHelperImpl<std::type_identity<unsigned long&>::type>, unsigned long&) @ 0x00000000069b7fd0
-3. DB::MergeTreeDataWriter::splitBlockIntoParts(DB::Block&&, unsigned long, std::shared_ptr<DB::StorageInMemoryMetadata const> const&, std::shared_ptr<DB::Context const>, std::shared_ptr<DB::AsyncInsertInfo>)
- @ 0x0000000010e26a35
-4. DB::ReplicatedMergeTreeSinkImpl<false>::consume(DB::Chunk) @ 0x0000000010ee905b
-5. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x000000001147df15
-6. void std::__function::__policy_invoker<void ()>::__call_impl<std::__function::__default_alloc_func<DB::ExceptionKeepingTransform::work()::$_1, void ()>>(std::__function::__policy_storage const*) @ 0x000000
-00113c3ea9
-7. DB::runStep(std::function<void ()>, DB::ThreadStatus*, std::atomic<unsigned long>*) @ 0x00000000113c3d30
-8. DB::ExceptionKeepingTransform::work() @ 0x00000000113c373d
-9. DB::ExecutionThreadContext::executeTask() @ 0x000000001119ff93
-10. DB::PipelineExecutor::executeStepImpl(unsigned long, std::atomic<bool>*) @ 0x0000000011196f10
-11. DB::PipelineExecutor::executeStep(std::atomic<bool>*) @ 0x0000000011196aa9
-12. DB::DistributedSink::writeToLocal(DB::Cluster::ShardInfo const&, DB::Block const&, unsigned long) @ 0x0000000010b22bd9
-13. DB::DistributedSink::writeAsyncImpl(DB::Block const&, unsigned long) @ 0x0000000010b1ea24
-14. DB::DistributedSink::consume(DB::Chunk) @ 0x0000000010b1d67c
-15. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x000000001147df15
-16. void std::__function::__policy_invoker<void ()>::__call_impl<std::__function::__default_alloc_func<DB::ExceptionKeepingTransform::work()::$_1, void ()>>(std::__function::__policy_storage const*) @ 0x00000000113c3ea9
-17. DB::runStep(std::function<void ()>, DB::ThreadStatus*, std::atomic<unsigned long>*) @ 0x00000000113c3d30
-18. DB::ExceptionKeepingTransform::work() @ 0x00000000113c373d
-19. DB::ExecutionThreadContext::executeTask() @ 0x000000001119ff93
-20. DB::PipelineExecutor::executeStepImpl(unsigned long, std::atomic<bool>*) @ 0x0000000011196f10
-21. DB::PipelineExecutor::executeImpl(unsigned long, bool) @ 0x00000000111967fd
-22. DB::PipelineExecutor::execute(unsigned long, bool) @ 0x00000000111965e1
-23. DB::CompletedPipelineExecutor::execute() @ 0x000000001119553e
-24. DB::executeQuery(DB::ReadBuffer&, DB::WriteBuffer&, bool, std::shared_ptr<DB::Context>, std::function<void (DB::QueryResultDetails const&)>, DB::QueryFlags, std::optional<DB::FormatSettings> const&, std::function<void (DB::IOutputFormat&)>) @ 0x000000001017ebf8
-25. DB::HTTPHandler::processQuery(DB::HTTPServerRequest&, DB::HTMLForm&, DB::HTTPServerResponse&, DB::HTTPHandler::Output&, std::optional<DB::CurrentThread::QueryScope>&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000110d92ca
-26. DB::HTTPHandler::handleRequest(DB::HTTPServerRequest&, DB::HTTPServerResponse&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000110dcc3d
-27. DB::HTTPServerConnection::run() @ 0x0000000011150508
-28. Poco::Net::TCPServerConnection::start() @ 0x0000000013d3cb27
-29. Poco::Net::TCPServerDispatcher::run() @ 0x0000000013d3d01e
-30. Poco::PooledThread::run() @ 0x0000000013e77f47
-31. Poco::ThreadImpl::runnableEntry(void*) @ 0x0000000013e75a63
- (version 24.3.2.1)
-
-
-
-
-
-
-Найти “виновные” таблицы с избыточным числом партиций:
-SELECT database, table, countDistinct(partition_id) AS partitions, count() AS parts FROM system.parts WHERE active GROUP BY database, table ORDER BY partitions DESC LIMIT 20;
-Посмотреть последние ошибки INSERT с кодом 252:
-SELECT event_time, initial_query_id, query_kind, query, exception_code, exception FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 ORDER BY event_time DESC LIMIT 50;
-Проверить состояние репликаций (если Replicated*):
-SELECT database, table, is_leader, absolute_delay, queue_size, last_queue_update_exception FROM system.replicas ORDER BY queue_size DESC LIMIT 20;
-Корреляция с Keeper:
-SELECT event_type, event_time FROM system.zookeeper_log WHERE event_type IN ('connection_loss','session_expired') ORDER BY event_time DESC LIMIT 100;
-
-
-
-SELECT event_time, initial_user, address, database, table, query, exception_code, exception FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 ORDER BY event_time DESC LIMIT 50;
-
-
-
-
-Если известна формула PARTITION BY для таблицы (например, toYYYYMM(date)), можно на стороне ClickHouse воспроизвести для примера:
-SELECT countDistinct(toYYYYMM(date)) FROM <их_источник_данных_или_временная_таблица>;
-В качестве прокси‑метрики — частота 252 в query_log у их пользователя/сервиса по времени:
-SELECT toStartOfMinute(event_time) AS ts, initial_user, database, table, count() AS errors FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 GROUP BY ts, initial_user, database, table ORDER BY ts DESC LIMIT 100;
-
-
-
-
-
-
-По факту, на стороне ClickHouse (лучший способ)
-Считаем, сколько партиций затронул каждый конкретный INSERT, по логу частей:
-Показывает “сколько партиций создал/дотронулся этот запрос”.
-Пример (за последний час):
-SELECT
-q.event_time, q.initial_user, q.database, q.table, q.query_id,
-countDistinct(p.partition_id) AS partitions_touched,
-countIf(p.event_type = 'NewPart') AS new_parts,
-sumIf(p.rows, p.event_type = 'NewPart') AS rows_written
-FROM system.query_log AS q
-LEFT JOIN system.part_log AS p
-ON p.query_id = q.query_id
-AND p.database = q.database
-AND p.table = q.table
-AND p.event_time >= q.event_time - INTERVAL 10 MINUTE
-WHERE q.type = 'QueryFinish'
-AND q.query_kind = 'Insert'
-AND q.event_time > now() - INTERVAL 1 HOUR
-GROUP BY q.event_time, q.initial_user, q.database, q.table, q.query_id
-ORDER BY partitions_touched DESC
-LIMIT 50;
-Это даёт прямое “доказательство” по каждому INSERT: “вот ваш запрос, он тронул 137 партиций” — и покажет, кто/когда это сделал.
-Если INSERT был вида INSERT INTO … SELECT … (внутри CH)
-Запустите SELECT‑часть отдельно и посчитайте уникальные значения выражения PARTITION BY:
-Пример при PARTITION BY toYYYYMM(date):
-SELECT countDistinct(toYYYYMM(date))
-FROM <source_tables_and_filters_from_insert>;
-Это покажет, что именно этот источник/фильтр породил >100 разных партиций в одном батче.
-Если источник внешняя пачка (файл/HTTP поток)
-Можно “примерить” партиционирование к этому файлу через table function input(), не вставляя:
-Пример для CSV в stdin, PARTITION BY toYYYYMM(date):
-cat batch.csv | clickhouse-client -q "SELECT countDistinct(toYYYYMM(date)) FROM input('date Date, ...') FORMAT CSV";
-Аналогично для JSONEachRow и т.п., подставив схему.
-Проверка схемы и текущих партиций (контекст)
-Формула PARTITION BY:
-SHOW CREATE TABLE db.table; или
-SELECT partition_key FROM system.tables WHERE database='db' AND name='table';
-Сколько всего партиций сейчас (это не то же самое, что “в одном INSERT”):
-SELECT countDistinct(partition_id) FROM system.parts WHERE database='db' AND table='table' AND active;
-Почему 572 “всего партиций” — не объясняет 252
-
-
-
-
-
-
-
-
-ариант A: без join — кто трогает много партиций в одном запросе
-
-Работает даже если в query_log чего‑то не хватает.
-Смотрим по part_log за последний час только события создания новых частей:
-SELECT
-query_id,
-database,
-table,
-countDistinct(partition_id) AS partitions_touched,
-sum(rows) AS rows_written,
-min(event_time) AS first_seen,
-max(event_time) AS last_seen
-FROM system.part_log
-WHERE event_time > now() - INTERVAL 1 HOUR
-AND event_type = 'NEW_PART'
-GROUP BY query_id, database, table
-ORDER BY partitions_touched DESC
-LIMIT 50;
-Вариант B: с привязкой к пользователю (join по query_id)
-
-Аккуратнее с query_kind — в 24.3 его может не быть. Фильтруем по тексту запроса.
-WITH
-(
-SELECT
-query_id,
-any(event_time) AS qtime,
-any(initial_user) AS initial_user,
-any(database) AS q_db,
-any(table) AS q_table
-FROM system.query_log
-WHERE event_time > now() - INTERVAL 2 HOUR
-AND type = 'QueryFinish'
-AND startsWith(lowerUTF8(query), 'insert') -- вместо query_kind
-GROUP BY query_id
-) AS q
-SELECT
-p.query_id,
-q.initial_user,
-p.database,
-p.table,
-countDistinctIf(p.partition_id, p.event_type = 'NEW_PART') AS partitions_touched,
-sumIf(p.rows, p.event_type = 'NEW_PART') AS rows_written,
-min(p.event_time) AS first_seen,
-max(p.event_time) AS last_seen
-FROM system.part_log AS p
-LEFT JOIN q USING (query_id)
-WHERE p.event_time > now() - INTERVAL 1 HOUR
-GROUP BY p.query_id, q.initial_user, p.database, p.table
-ORDER BY partitions_touched DESC
-LIMIT 50;
-Мини‑проверки, если всё равно не взлетает
-
-Значения event_type:
-SELECT DISTINCT toString(event_type) FROM system.part_log ORDER BY 1;
-Убедитесь, что там 'NEW_PART' (не 'NewPart').
-Есть ли строки в part_log:
-SELECT count() FROM system.part_log WHERE event_time > now() - INTERVAL 1 HOUR;
-Есть ли строки в query_log для INSERT:
-SELECT count() FROM system.query_log WHERE event_time > now() - INTERVAL 1 HOUR AND type='QueryFinish' AND startsWith(lowerUTF8(query),'insert');
-
-
-
-
-
-
-
-
-
-SELECT query_id, database, table, countDistinct(partition_id) AS partitions_touched, sum(rows) AS rows_written, min(event_time) AS first_seen, max(event_time) AS last_seen FROM cluster('gpn', system.part_log) WHERE event_time > now() - INTERVAL 1 HOUR AND event_type='NEW_PART' GROUP BY query_id, database, table ORDER BY partitions_touched DESC LIMIT 50;
-Частота 252 по пользователям/таблицам:
-SELECT toStartOfMinute(event_time) AS ts, initial_user, database, table, count() AS errors FROM system.query_log WHERE type='ExceptionWhileProcessing' AND exception_code=252 GROUP BY ts, initial_user, database, table ORDER BY ts DESC LIMIT 100;
-
-
-
-
-
-
-
-
-
-
-
-1. │ 2025-12-01 13:59:41 │ dp_w_u_tin_ai2 │ ::ffff:10.50.84.10 │ default          │ ['brd_stg_udh_asodu_tm_hnt'] │ ['brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_yugn_d']   │ INSERT INTO brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_yugn_d (WellId, ParameterId, Timestamp, Value, Period, WellType)  FORMAT TabSeparated
-   │            252 │ Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is controlled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT queries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..10000. Please note, that partitioning is not intended to speed up SELECT queries (ORDER BY key is sufficient to make range queries fast). Partitions are intended for data manipulation (DROP PARTITION, etc). (TOO_MANY_PARTS) (version 24.3.2.1) │
- 2. │ 2025-12-01 13:59:40 │ dp_w_u_tin_ai2 │ ::ffff:10.50.84.10 │ default          │ ['brd_stg_udh_asodu_tm_hnt'] │ ['brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_prbs_1_d'] │ INSERT INTO brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_prbs_1_d (WellId, ParameterId, Timestamp, Value, Period, WellType)  FORMAT TabSeparated
- │            252 │ Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is controlled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT queries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..10000. Please note, that partitioning is not intended to speed up SELECT queries (ORDER BY key is sufficient to make range queries fast). Partitions are intended for data manipulation (DROP PARTITION, etc). (TOO_MANY_PARTS) (version 24.3.2.1) │
- 3. │ 2025-12-01 13:59:40 │ dp_w_u_tin_ai2 │ ::ffff:10.50.84.10 │ default          │ ['brd_stg_udh_asodu_tm_hnt'] │ ['brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_yugn_d']   │ INSERT INTO brd_stg_udh_asodu_tm_hnt.asodu__stg_udh_asodu_tm_hnt__parameters_adku_hant_yugn_d (WellId, ParameterId, Timestamp, Value, Period, WellType)  FORMAT TabSeparated
-   │            252 │ Code: 252. DB::Exception: Too many partitions for single INSERT block (more than 100). The limit is controlled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative performance impact, including slow server startup, slow INSERT queries and slow SELECT queries. Recommended total number of partitions for a table is under 1000..10000. Please note, that partitioning is not intended to speed up SELECT queries (ORDER BY key is sufficient to make range queries fast). Partitions are intended for data manipulation (DROP PARTITION, etc). (TOO_MANY_PARTS) (version 24.3.2.1) │
+[pid  1077] close(4)                    = 0
+[pid  1077] clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, {tv_sec=1627, tv_nsec=226277499},  <unfinished ...>
+[pid  1249] <... pselect6 resumed>)     = 0 (Timeout)
+[pid  1249] newfstatat(9, "", {st_mode=S_IFREG|0600, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1249] newfstatat(10, "", {st_mode=S_IFREG|0600, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1249] newfstatat(11, "", {st_mode=S_IFREG|0600, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1249] newfstatat(12, "", {st_mode=S_IFREG|0600, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1249] pselect6(6, [5], NULL, NULL, {tv_sec=1, tv_nsec=0}, NULL <unfinished ...>
+[pid  1568] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=38, tv_nsec=725736865})
+[pid  1567] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=38, tv_nsec=725879726})
+[pid  1566] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=38, tv_nsec=725902986})
+[pid  1565] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=38, tv_nsec=730349509})
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=571863311} /* 1970-01-01T03:27:06.571863311+0300 */, {tv_sec=1626, tv_nsec=571863311} /* 1970-01-01T03:27:06.571863311+0300 */], 0 <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=571906643} /* 1970-01-01T03:27:06.571906643+0300 */, {tv_sec=1626, tv_nsec=571906643} /* 1970-01-01T03:27:06.571906643+0300 */], 0 <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=572020437} /* 1970-01-01T03:27:06.572020437+0300 */, {tv_sec=1626, tv_nsec=572020437} /* 1970-01-01T03:27:06.572020437+0300 */], 0 <unfinished ...>
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=572131938} /* 1970-01-01T03:27:06.572131938+0300 */, {tv_sec=1626, tv_nsec=572131938} /* 1970-01-01T03:27:06.572131938+0300 */], 0 <unfinished ...>
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38220), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1567] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] getppid( <unfinished ...>
+[pid  1566] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... getppid resumed>)      = 1249
+[pid  1565] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=572822581} /* 1970-01-01T03:27:06.572822581+0300 */, {tv_sec=1626, tv_nsec=572822581} /* 1970-01-01T03:27:06.572822581+0300 */], 0 <unfinished ...>
+[pid  1566] getppid( <unfinished ...>
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1565] getppid( <unfinished ...>
+[pid  1566] <... getppid resumed>)      = 1249
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=573026928} /* 1970-01-01T03:27:06.573026928+0300 */, {tv_sec=1626, tv_nsec=573026928} /* 1970-01-01T03:27:06.573026928+0300 */], 0 <unfinished ...>
+[pid  1565] <... getppid resumed>)      = 1249
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] <... fcntl resumed>)        = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=573121872} /* 1970-01-01T03:27:06.573121872+0300 */, {tv_sec=1626, tv_nsec=573121872} /* 1970-01-01T03:27:06.573121872+0300 */], 0 <unfinished ...>
+[pid  1566] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1565] pselect6(11, [8 10], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] close(13)                   = 0
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] read(13, "", 4096)          = 0
+[pid  1568] close(13)                   = 0
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY) = 13
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] lseek(13, 0, SEEK_SET)      = 0
+[pid  1568] read(13, "-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1568] close(13)                   = 0
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE, [1], [4]) = 0
+[pid  1568] getsockname(11, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] getpeername(11, {sa_family=AF_INET, sin_port=htons(38220), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1568] ioctl(11, FIONBIO, [0])     = 0
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4) = -1 ENOENT (No such file or directory)
+[pid  1568] read(11, "\26\3\1\0\275", 5) = 5
+[pid  1568] read(11, "\1\0\0\271\3\3j\234J\324\346\334\324\353\313\366&\307\243?*4{a}\303\364T\177,\3730"..., 189) = 189
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3\37\341\302\244\32\357\20\322N\254\301\305\24\260\22/\300\2769V\332"..., 2186) = 2186
+[pid  1568] read(11, "\26\3\3\0%", 5)   = 5
+[pid  1568] read(11, "\20\0\0! \214$\206\330\271\177\321)K\2\232o\233\306\376a\241~D~}:\36vo\324\202"..., 37) = 37
+[pid  1568] read(11, "\24\3\3\0\1", 5)  = 5
+[pid  1568] read(11, "\1", 1)           = 1
+[pid  1568] read(11, "\26\3\3\0(", 5)   = 5
+[pid  1568] read(11, "\37\177\204}n\237\360\30w\276lbK\217\0Cm\322\36\275\177\342Nd\234\252\377\\\370\251\215\226"..., 40) = 40
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260<#\245\346N\3174\243`p\255Sg_G\275\314"..., 242) = 242
+[pid  1568] read(11, "\27\3\3\6?", 5)   = 5
+[pid  1568] read(11, "\37\177\204}n\237\360\31yR2\10SL#\32\354WGY\370\366R\341\330G\353\226\312QK\207"..., 1599) = 1599
+[pid  1568] getsockname(8, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1568] rt_sigprocmask(SIG_BLOCK, ~[], [], 8) = 0
+[pid  1568] clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7fd13fdff990, parent_tid=0x7fd13fdff990, exit_signal=0, stack=0x7fd13f5ff000, stack_size=0x7fff80, tls=0x7fd13fdff6c0}strace: Process 33882 attached
+ <unfinished ...>
+[pid 33882] rseq(0x7fd13fdfffe0, 0x20, 0, 0x53053053 <unfinished ...>
+[pid  1568] <... clone3 resumed> => {parent_tid=[33882]}, 88) = 33882
+[pid 33882] <... rseq resumed>)         = 0
+[pid  1568] rt_sigprocmask(SIG_SETMASK, [],  <unfinished ...>
+[pid 33882] set_robust_list(0x7fd13fdff9a0, 24 <unfinished ...>
+[pid  1568] <... rt_sigprocmask resumed>NULL, 8) = 0
+[pid 33882] <... set_robust_list resumed>) = 0
+[pid 33882] rt_sigprocmask(SIG_SETMASK, [],  <unfinished ...>
+[pid  1568] futex(0x2f8b4a30, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, FUTEX_BITSET_MATCH_ANY <unfinished ...>
+[pid 33882] <... rt_sigprocmask resumed>NULL, 8) = 0
+[pid 33882] gettid()                    = 33882
+[pid 33882] mmap(NULL, 16384, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fd14798e000
+[pid 33882] gettid()                    = 33882
+[pid 33882] futex(0x2f8b4a30, FUTEX_WAKE_PRIVATE, 1) = 1
+[pid  1568] <... futex resumed>)        = 0
+[pid 33882] futex(0x7fd138000ba0, FUTEX_WAIT_BITSET_PRIVATE, 0, {tv_sec=1626, tv_nsec=592594530}, FUTEX_BITSET_MATCH_ANY <unfinished ...>
+[pid  1568] sendto(3, "\27\3\3\0\37\337\376\327\27\264~\213=\0301\256\372\6\241\177\304\321\24>\17\t\35\250\206\"\325\215"..., 36, MSG_NOSIGNAL, NULL, 0) = 36
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0S", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\371S\217e\247\68\3346\2B28\254*\36\357`G\366\347A?CvM\314\375U\236`\274"..., 83, 0, NULL, NULL) = 83
+[pid  1568] getpid()                    = 1568
+[pid  1568] sendto(3, "\27\3\3\0\34!\350\31O\21\1\310\276t\354A\234\24(\353\200]/\257C\226\275\375\201\211\216K"..., 33, MSG_NOSIGNAL, NULL, 0) = 33
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0\"", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\34a\321\5&\230\254\305\243\0Y \354N\7\244\200\330\274c\240\t\370\216\36\tZ\225'\200\232~"..., 34, 0, NULL, NULL) = 34
+[pid  1568] sendto(3, "\27\3\3\0031\33\257U\34@1F\"\\\"J\376B\7\250d\354)\372\35\251\313\353\233*gp"..., 822, MSG_NOSIGNAL, NULL, 0) = 822
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\3\253", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "^Oy\fjPF\350\330\315\374\24|\230\312lW\235\365p\374\251\276d\223K\34\364O\"\31\304"..., 939, 0, NULL, NULL) = 939
+[pid  1568] sendto(3, "\27\3\3\4\243\313\330\344l\203\207\273\225\315\301.Ck\324\301\306%\313L\256\275\242\364~5-v"..., 1192, MSG_NOSIGNAL, NULL, 0) = 1192
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\1\361", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "B\2322\374B[\356\266\276'\3048\212E\274G>%\350\250\3469g\26\267\322\345\255\363\7Jj"..., 497, 0, NULL, NULL) = 497
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/ca-chain.crt", O_RDONLY|O_CLOEXEC) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=3726, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=3726, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "-----BEGIN CERTIFICATE-----\nMIID"..., 4096) = 3726
+[pid  1568] read(13, "", 4096)          = 0
+[pid  1568] close(13)                   = 0
+[pid  1568] write(2, "ldap_create\n", 12) = 12
+[pid  1568] write(2, "ldap_url_parse_ext(ldaps://spb99"..., 63) = 63
+[pid  1568] write(2, "ldap_sasl_bind\n", 15) = 15
+[pid  1568] write(2, "ldap_send_initial_request\n", 26) = 26
+[pid  1568] write(2, "ldap_new_connection 1 1 0\n", 26) = 26
+[pid  1568] write(2, "ldap_int_open_connection\n", 25) = 25
+[pid  1568] write(2, "ldap_connect_to_host: TCP spb99-"..., 61) = 61
+[pid  1568] newfstatat(AT_FDCWD, "/etc/nsswitch.conf", {st_mode=S_IFREG|0644, st_size=647, ...}, 0) = 0
+[pid  1568] newfstatat(AT_FDCWD, "/etc/resolv.conf", {st_mode=S_IFREG|0644, st_size=937, ...}, 0) = 0
+[pid  1568] openat(AT_FDCWD, "/etc/hosts", O_RDONLY|O_CLOEXEC) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0644, st_size=219, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] lseek(13, 0, SEEK_SET)      = 0
+[pid  1568] read(13, "127.0.0.1   localhost localhost."..., 4096) = 219
+[pid  1568] read(13, "", 4096)          = 0
+[pid  1568] close(13)                   = 0
+[pid  1568] rt_sigprocmask(SIG_BLOCK, [HUP USR1 USR2 PIPE ALRM CHLD TSTP URG VTALRM PROF WINCH IO], [], 8) = 0
+[pid 33882] <... futex resumed>)        = -1 ETIMEDOUT (Connection timed out)
+[pid  1568] uname( <unfinished ...>
+[pid 33882] munmap(0x7fd14798e000, 16384 <unfinished ...>
+[pid  1568] <... uname resumed>{sysname="Linux", nodename="spb99akl-darf6", ...}) = 0
+[pid 33882] <... munmap resumed>)       = 0
+[pid  1568] rt_sigprocmask(SIG_SETMASK, [],  <unfinished ...>
+[pid 33882] rt_sigprocmask(SIG_BLOCK, ~[RT_1],  <unfinished ...>
+[pid  1568] <... rt_sigprocmask resumed>NULL, 8) = 0
+[pid 33882] <... rt_sigprocmask resumed>NULL, 8) = 0
+[pid  1568] socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP <unfinished ...>
+[pid 33882] madvise(0x7fd13f5ff000, 8368128, MADV_DONTNEED) = 0
+[pid  1568] <... socket resumed>)       = 13
+[pid 33882] exit(0 <unfinished ...>
+[pid  1568] setsockopt(13, SOL_IP, IP_RECVERR, [1], 4 <unfinished ...>
+[pid 33882] <... exit resumed>)         = ?
+[pid  1568] <... setsockopt resumed>)   = 0
+[pid 33882] +++ exited with 0 +++
+[pid  1568] connect(13, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0
+[pid  1568] poll([{fd=13, events=POLLOUT}], 1, 0) = 1 ([{fd=13, revents=POLLOUT}])
+[pid  1568] sendmmsg(13, [{msg_hdr={msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\376\367\1 \0\1\0\0\0\0\0\1\nspb99-dc01\fgazprom-"..., iov_len=58}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=58}, {msg_hdr={msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\2\366\1 \0\1\0\0\0\0\0\1\nspb99-dc01\fgazprom-"..., iov_len=58}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, msg_len=58}], 2, MSG_NOSIGNAL) = 2
+[pid  1568] poll([{fd=13, events=POLLIN}], 1, 5000) = 1 ([{fd=13, revents=POLLIN}])
+[pid  1568] ioctl(13, FIONREAD, [74])   = 0
+[pid  1568] recvfrom(13, "\376\367\201\200\0\1\0\1\0\0\0\1\nspb99-dc01\fgazprom-"..., 2048, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, [28 => 16]) = 74
+[pid  1568] poll([{fd=13, events=POLLIN}], 1, 4999) = 1 ([{fd=13, revents=POLLIN}])
+[pid  1568] ioctl(13, FIONREAD, [116])  = 0
+[pid  1568] recvfrom(13, "\2\366\201\200\0\1\0\0\0\1\0\1\nspb99-dc01\fgazprom-"..., 65536, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, [28 => 16]) = 116
+[pid  1568] close(13)                   = 0
+[pid  1568] socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 13
+[pid  1568] write(2, "ldap_new_socket: 13\n", 20) = 20
+[pid  1568] fcntl(13, F_SETFD, FD_CLOEXEC) = 0
+[pid  1568] write(2, "ldap_prepare_socket: 13\n", 24) = 24
+[pid  1568] setsockopt(13, SOL_SOCKET, SO_KEEPALIVE, [1], 4) = 0
+[pid  1568] setsockopt(13, SOL_TCP, TCP_NODELAY, [1], 4) = 0
+[pid  1568] write(2, "ldap_connect_to_host: Trying 10."..., 46) = 46
+[pid  1568] write(2, "ldap_pvt_connect: fd: 13 tm: -1 "..., 41) = 41
+[pid  1568] write(2, "attempting to connect: \n", 24) = 24
+[pid  1568] connect(13, {sa_family=AF_INET, sin_port=htons(3269), sin_addr=inet_addr("10.50.24.45")}, 16) = 0
+[pid  1568] write(2, "connect success\n", 16) = 16
+[pid  1568] write(13, "\26\3\1\1p\1\0\1l\3\3\5\377]\334)\303+\360\374u\223\316v0K`X3\324\347\364"..., 373) = 373
+[pid  1568] read(13, "\26\3\3\25\346", 5) = 5
+[pid  1568] read(13, "\2\0\0U\3\3i:\236\304q\372\245\370\234\32\300\216j7\5\357\276,W\36\2\253\250^\3436"..., 5606) = 5606
+[pid  1568] write(13, "\26\3\3\0\7\v\0\0\3\0\0\0", 12) = 12
+[pid  1568] write(13, "\26\3\3\0%\20\0\0! \206<\201\301\t\264$\330Pk\5\325J\\c\220\276Z\227\375q\213"..., 42) = 42
+[pid  1568] write(13, "\24\3\3\0\1\1", 6) = 6
+[pid  1568] write(13, "\26\3\3\0(\0\0\0\0\0\0\0\0w7\301\344I\30c\373\232\245\n\232/V\"r\215\276\374"..., 45) = 45
+[pid  1568] read(13, "\24\3\3\0\1", 5)  = 5
+[pid  1568] read(13, "\1", 1)           = 1
+[pid  1568] read(13, "\26\3\3\0(", 5)   = 5
+[pid  1568] read(13, "\0\0\0\0\0\0\0\0*\v\261\211\260Q\337%\204\n\200\317\364\31\311t\303k\204\355'lH\331"..., 40) = 40
+[pid  1568] write(2, "TLS: peer cert untrusted or revo"..., 47) = 47
+[pid  1568] write(2, "TLS: can't connect: (unknown err"..., 42) = 42
+[pid  1568] shutdown(13, SHUT_RDWR)     = 0
+[pid  1568] close(13)                   = 0
+[pid  1568] write(2, "ldap_err2string\n", 16) = 16
+[pid  1568] getpid()                    = 1568
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/pendulum/datetime.py", {st_mode=S_IFREG|0600, st_size=42309, ...}, 0) = 0
+[pid  1568] write(1, "[2025-12-11T13:36:52.824+0300] {"..., 155) = 155
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/babel/locale-data/en.dat", {st_mode=S_IFREG|0600, st_size=217633, ...}, 0) = 0
+[pid  1568] sendto(3, "\27\3\3\0\37\205Z7\301\246\3574\271\335\352MV\30L\317M\302\363&\343\37\3736^uR\20"..., 36, MSG_NOSIGNAL, NULL, 0) = 36
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0%", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\344gS\377\315Y1\315a?].\2368\177-\240\256\32V6\257\322\323\311\332jM\362\207\266i"..., 37, 0, NULL, NULL) = 37
+[pid  1568] write(11, "\27\3\3\3\1\371\20\341#\376\300\21\323\250J\215\243\235\215BT\20\206\243\334o-?\221^\242\1"..., 774) = 774
+[pid  1568] write(11, "\27\3\3\1\225\371\20\341#\376\300\21\324aI\345\311\374,\31Y)u\257\320\23.\10\316\3036\324"..., 410) = 410
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 441) = 441
+[pid  1568] close(11)                   = 0
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=607494803} /* 1970-01-01T03:27:06.607494803+0300 */, {tv_sec=1626, tv_nsec=607494803} /* 1970-01-01T03:27:06.607494803+0300 */], 0) = 0
+[pid  1568] accept4(8, 0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] getppid()                   = 1249
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=607814791} /* 1970-01-01T03:27:06.607814791+0300 */, {tv_sec=1626, tv_nsec=607814791} /* 1970-01-01T03:27:06.607814791+0300 */], 0) = 0
+[pid  1568] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL) = 1 (in [8], left {tv_sec=49, tv_nsec=997378551})
+[pid  1567] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=962559339})
+[pid  1565] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=962766271})
+[pid  1566] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=962629197})
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=610766726} /* 1970-01-01T03:27:06.610766726+0300 */, {tv_sec=1626, tv_nsec=610766726} /* 1970-01-01T03:27:06.610766726+0300 */], 0 <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=610787579} /* 1970-01-01T03:27:06.610787579+0300 */, {tv_sec=1626, tv_nsec=610787579} /* 1970-01-01T03:27:06.610787579+0300 */], 0 <unfinished ...>
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=610823330} /* 1970-01-01T03:27:06.610823330+0300 */, {tv_sec=1626, tv_nsec=610823330} /* 1970-01-01T03:27:06.610823330+0300 */], 0 <unfinished ...>
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=610815451} /* 1970-01-01T03:27:06.610815451+0300 */, {tv_sec=1626, tv_nsec=610815451} /* 1970-01-01T03:27:06.610815451+0300 */], 0 <unfinished ...>
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38232), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1567] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] getppid( <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] <... getppid resumed>)      = 1249
+[pid  1566] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=611394478} /* 1970-01-01T03:27:06.611394478+0300 */, {tv_sec=1626, tv_nsec=611394478} /* 1970-01-01T03:27:06.611394478+0300 */], 0 <unfinished ...>
+[pid  1565] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] getppid( <unfinished ...>
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1567] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1566] <... getppid resumed>)      = 1249
+[pid  1565] getppid( <unfinished ...>
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=611627150} /* 1970-01-01T03:27:06.611627150+0300 */, {tv_sec=1626, tv_nsec=611627150} /* 1970-01-01T03:27:06.611627150+0300 */], 0 <unfinished ...>
+[pid  1565] <... getppid resumed>)      = 1249
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] <... fcntl resumed>)        = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=611695501} /* 1970-01-01T03:27:06.611695501+0300 */, {tv_sec=1626, tv_nsec=611695501} /* 1970-01-01T03:27:06.611695501+0300 */], 0 <unfinished ...>
+[pid  1566] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1565] pselect6(11, [8 10], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] close(13)                   = 0
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] read(13, "", 4096)          = 0
+[pid  1568] close(13)                   = 0
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY) = 13
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] lseek(13, 0, SEEK_SET)      = 0
+[pid  1568] read(13, "-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1568] close(13)                   = 0
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE, [1], [4]) = 0
+[pid  1568] getsockname(11, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] getpeername(11, {sa_family=AF_INET, sin_port=htons(38232), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1568] ioctl(11, FIONBIO, [0])     = 0
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4) = -1 ENOENT (No such file or directory)
+[pid  1568] read(11, "\26\3\1\0\275", 5) = 5
+[pid  1568] read(11, "\1\0\0\271\3\3\251&\301\222R\37^\rs\334\221(\321!p;E3?\236@\366IY9v"..., 189) = 189
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3M\245\362q\326\300}C\334\214\317\211\5\374\272L:\260\16\237r"..., 2186) = 2186
+[pid  1568] read(11, "\26\3\3\0%", 5)   = 5
+[pid  1568] read(11, "\20\0\0! \236_\33\20\265\7\33\201\35\373hZ\255\235bv\336\354\\\230w\340\211\3327\255\237"..., 37) = 37
+[pid  1568] read(11, "\24\3\3\0\1", 5)  = 5
+[pid  1568] read(11, "\1", 1)           = 1
+[pid  1568] read(11, "\26\3\3\0(", 5)   = 5
+[pid  1568] read(11, "\270\360\227&\226\20\363\22n\22\362\334\1\354c\347\212o<\241{\230\323D=\320M\354\255?\235\0"..., 40) = 40
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\216'7\312o\255\261p\267\247\345\260L\20\277wy"..., 242) = 242
+[pid  1568] read(11, "\27\3\3\5k", 5)   = 5
+[pid  1568] read(11, "\270\360\227&\226\20\363\23\361\370/\335\306:+\3625\217]Ov\23\235]P\316\6J\360[m\27"..., 1387) = 1387
+[pid  1568] getsockname(8, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/babel/locale-data/en.dat", {st_mode=S_IFREG|0600, st_size=217633, ...}, 0) = 0
+[pid  1568] sendto(3, "\27\3\3\0\37\210]QK\19\23\241\4# \2002\326.\347\227\251SmB\266\207\16\323\3012"..., 36, MSG_NOSIGNAL, NULL, 0) = 36
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0S", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\212\271\200\t\304\34581>\240\365\244^\255\272^\371\313_V\244Q\7\215wm\10Q\375\310W\227"..., 83, 0, NULL, NULL) = 83
+[pid  1568] getpid()                    = 1568
+[pid  1568] sendto(3, "\27\3\3\0\34\203\3534\220\304\220o/\31\20z\237\350>\205\3400,\275\2764HyE\307b\277"..., 33, MSG_NOSIGNAL, NULL, 0) = 33
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0\"", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "lD\363\214\237\322\220\5\210\354\301\263\241O'[\341\234\2I[\216i\4\321\26\235O\271\7C\4"..., 34, 0, NULL, NULL) = 34
+[pid  1568] sendto(3, "\27\3\3\3\361T\342\362\355\212Lm\361\232\205\320\2105tc\330\0\212\211\315\361\312\333\5\306Y\365"..., 1014, MSG_NOSIGNAL, NULL, 0) = 1014
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\1\315", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\340hh\7\35\32\322\23\250\320\267%\fy\230\221\257Nu\305\27\224\r\330D\262Oq\333\304w\264"..., 461, 0, NULL, NULL) = 461
+[pid  1568] sendto(3, "\27\3\3\0\37v\n\210\277`\26\266\23\213\220uLm\216p\276f\4\3\347\36\\\322\21\333;\212"..., 36, MSG_NOSIGNAL, NULL, 0) = 36
+[pid  1568] poll([{fd=3, events=POLLIN|POLLERR}], 1, -1) = 1 ([{fd=3, revents=POLLIN}])
+[pid  1568] recvfrom(3, "\27\3\3\0%", 5, 0, NULL, NULL) = 5
+[pid  1568] recvfrom(3, "\322\225\3117N\37,\333!\241\22\327\330Al\356\5\21M\33\365\224\364\213\324\37\367\322\203\30\302\333"..., 37, 0, NULL, NULL) = 37
+[pid  1568] write(11, "\27\3\3\2O|%\313y>`\223\24~\315\t$\337\346X\216\0106\3304\306\231\377(WJ\234"..., 596) = 596
+[pid  1568] write(11, "\27\3\3@\30|%\313y>`\223\25vaJn\252\210u\22\216Z\307!\241s\336\10i\346p"..., 16413) = 16413
+[pid  1568] write(11, "\27\3\3\t\247|%\313y>`\223\26\334\337>D\226g\217\210\304\16\372#GT\206T\350%p"..., 2476) = 2476
+[pid  1568] getpid()                    = 1568
+[pid  1568] getpid()                    = 1568
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 442) = 442
+[pid  1568] close(11)                   = 0
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=626197632} /* 1970-01-01T03:27:06.626197632+0300 */, {tv_sec=1626, tv_nsec=626197632} /* 1970-01-01T03:27:06.626197632+0300 */], 0) = 0
+[pid  1568] accept4(8, 0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] getppid()                   = 1249
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=626418793} /* 1970-01-01T03:27:06.626418793+0300 */, {tv_sec=1626, tv_nsec=626418793} /* 1970-01-01T03:27:06.626418793+0300 */], 0) = 0
+[pid  1568] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL) = 1 (in [8], left {tv_sec=49, tv_nsec=988935281})
+[pid  1567] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=973997707})
+[pid  1566] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=974330145})
+[pid  1565] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=974221719})
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=637667793} /* 1970-01-01T03:27:06.637667793+0300 */, {tv_sec=1626, tv_nsec=637667793} /* 1970-01-01T03:27:06.637667793+0300 */], 0 <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=637683925} /* 1970-01-01T03:27:06.637683925+0300 */, {tv_sec=1626, tv_nsec=637683925} /* 1970-01-01T03:27:06.637683925+0300 */], 0 <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=637700450} /* 1970-01-01T03:27:06.637700450+0300 */, {tv_sec=1626, tv_nsec=637700450} /* 1970-01-01T03:27:06.637700450+0300 */], 0 <unfinished ...>
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=637724073} /* 1970-01-01T03:27:06.637724073+0300 */, {tv_sec=1626, tv_nsec=637724073} /* 1970-01-01T03:27:06.637724073+0300 */], 0 <unfinished ...>
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38248), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1567] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1566] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] getppid( <unfinished ...>
+[pid  1566] getppid( <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... getppid resumed>)      = 1249
+[pid  1566] <... getppid resumed>)      = 1249
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=638284393} /* 1970-01-01T03:27:06.638284393+0300 */, {tv_sec=1626, tv_nsec=638284393} /* 1970-01-01T03:27:06.638284393+0300 */], 0 <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=638294905} /* 1970-01-01T03:27:06.638294905+0300 */, {tv_sec=1626, tv_nsec=638294905} /* 1970-01-01T03:27:06.638294905+0300 */], 0 <unfinished ...>
+[pid  1565] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1565] getppid( <unfinished ...>
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1565] <... getppid resumed>)      = 1249
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1566] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1567] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1568] <... fcntl resumed>)        = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=638584345} /* 1970-01-01T03:27:06.638584345+0300 */, {tv_sec=1626, tv_nsec=638584345} /* 1970-01-01T03:27:06.638584345+0300 */], 0) = 0
+[pid  1565] pselect6(11, [8 10], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 13
+[pid  1566] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=999544082})
+[pid  1565] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=999827666})
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=639228854} /* 1970-01-01T03:27:06.639228854+0300 */, {tv_sec=1626, tv_nsec=639228854} /* 1970-01-01T03:27:06.639228854+0300 */], 0 <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... pselect6 resumed>)     = 1 (in [8], left {tv_sec=49, tv_nsec=999571789})
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=639423528} /* 1970-01-01T03:27:06.639423528+0300 */, {tv_sec=1626, tv_nsec=639423528} /* 1970-01-01T03:27:06.639423528+0300 */], 0) = 0
+[pid  1568] read(13,  <unfinished ...>
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1568] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38272), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38262), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=639710877} /* 1970-01-01T03:27:06.639710877+0300 */, {tv_sec=1626, tv_nsec=639710877} /* 1970-01-01T03:27:06.639710877+0300 */], 0 <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1565] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38286), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] fcntl(12, F_GETFD <unfinished ...>
+[pid  1566] fcntl(12, F_GETFD <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... fcntl resumed>)        = 0
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] ioctl(12, FIONBIO, [0])     = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1565] fcntl(12, F_GETFD)          = 0x1 (flags FD_CLOEXEC)
+[pid  1565] fcntl(12, F_SETFD, FD_CLOEXEC) = 0
+[pid  1567] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1568] <... openat resumed>)       = 13
+[pid  1565] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] read(13,  <unfinished ...>
+[pid  1568] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1566] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] close(13)                   = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] getpid()                    = 1566
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... read resumed>"", 4096) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1566] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] <... read resumed>"", 4096) = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1566] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... read resumed>"", 4096) = 0
+[pid  1568] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] <... getsockopt resumed>[1], [4]) = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] getpeername(11,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38248), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1566] read(13, "-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1565] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getsockopt resumed>[1], [4]) = 0
+[pid  1568] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... read resumed>"\1\0\0\271\3\3\256\315T\223V\302A%\10\316\223\5\227RW@\223Jf'P%\34\265\365\246"..., 189) = 189
+[pid  1567] lseek(15, 0, SEEK_SET <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] getpeername(12,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38262), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1566] ioctl(12, FIONBIO, [0])     = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1565] <... read resumed>"", 4096) = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1566] read(12, "\1\0\0\271\3\3\37\322u\322\364\332{\336\264-\370T\332s=\245X\200\334m\4\22gb\315\""..., 189) = 189
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... getsockopt resumed>[1], [4]) = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] getpid()                    = 1566
+[pid  1566] getpid()                    = 1566
+[pid  1565] <... close resumed>)        = 0
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3\255J2\3219g!\352\3\226\f%\356:\356\26\300\24\22\215\n"..., 2186 <unfinished ...>
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1568] <... write resumed>)        = 2186
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] getpeername(12,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38272), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1566] write(12, "\26\3\3\0A\2\0\0=\3\3R468\265\310\205\250\204\342\367\331\3\335J\"\206\10\27\30\343"..., 2186 <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... write resumed>)        = 2186
+[pid  1568] <... read resumed>"\20\0\0! \336z7g\246\267\25\264\363=\252\222\327|<\331U\213X\373\300T\27\362\2150\0"..., 37) = 37
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1565] newfstatat(13, "", {st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1567] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1565] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] <... read resumed>"\1", 1)  = 1
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1565] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1568] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... read resumed>"\1\0\0\271\3\3\2g\306\210\205\230\261\234\376\314\6Uy\351\303#a\324XC\331\31\36\200\225\321"..., 189) = 189
+[pid  1566] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] <... read resumed>"\237k{^h\16\24\3079D\36\370\241\265\16\235a\271\272A\3373\342\256B\230\33\310\212v\207\215"..., 40) = 40
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] <... read resumed>"\20\0\0! \201gkz}\254\305\310\340\241\371/\216\271^\260\351A\313U^\n\226\250\214\254{"..., 37) = 37
+[pid  1565] <... getsockopt resumed>[1], [4]) = 0
+[pid  1565] getsockname(12, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] getpeername(12,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38286), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260P\360\207j\2358\16@\250\305\376X\3\232$\361?"..., 242 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1568] <... write resumed>)        = 242
+[pid  1566] <... read resumed>"\1", 1)  = 1
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1568] <... read resumed>"\27\3\3\4\200", 5) = 5
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"\237k{^h\16\24\310\260\245\301+wIdg\22\357\263/A\20`q_\3761\361\313\r\273\261"..., 1152) = 1152
+[pid  1566] <... read resumed>"\345T\241\355\333\3p\254A\220\365\372\3318j\217\26C>\217\350\3237J,\273\372\226/\346^N"..., 40) = 40
+[pid  1565] <... read resumed>"\1\0\0\271\3\3pH%\251\3\267\246\352\4\361\24\323\245\207\301H\200HGa\233\226~\3XM"..., 189) = 189
+[pid  1565] getpid()                    = 1565
+[pid  1568] getsockname(8,  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] getpid()                    = 1565
+[pid  1565] getpid()                    = 1565
+[pid  1565] getpid()                    = 1565
+[pid  1567] write(12, "\26\3\3\0A\2\0\0=\3\38k\270\347\307\33\263\322\242\24d\202\245\276v\230 \v\315\31\247"..., 2186 <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] <... write resumed>)        = 2186
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] write(12, "\26\3\3\0A\2\0\0=\3\3|\225\357\21\244\266\17\327+'\\\26?@c\22\341\31\v\37,"..., 2186 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... write resumed>)        = 2186
+[pid  1567] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1565] read(12,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap.min.css",  <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=121457, ...}, 0) = 0
+[pid  1566] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\317\254_S\343\350$\337K\37h;\4\332\3554V"..., 242 <unfinished ...>
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap.min.css",  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=121457, ...}, 0) = 0
+[pid  1567] read(12, "\20\0\0! \6\n\v\347\373\242\275\27.\377T|\252e@\320F\353\251\242\204\10\326\314\341B\304"..., 37) = 37
+[pid  1566] <... write resumed>)        = 242
+[pid  1565] <... read resumed>"\20\0\0! \22\275\353\25\3\332\257\342\213\265\205{1\23\260\370\352\277\306\20F-\227\26Kv\3"..., 37) = 37
+[pid  1568] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap.min.css", O_RDONLY|O_CLOEXEC) = 13
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1566] <... read resumed>"\27\3\3\4\224", 5) = 5
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=121457, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] ioctl(13, TCGETS <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1566] <... read resumed>"\345T\241\355\333\3p\255,\3756kD:\31b.!c\246\342\310\303\\0Nc\303\222\250\261\235"..., 1172) = 1172
+[pid  1568] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1567] <... read resumed>"\1", 1)  = 1
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] getsockname(8,  <unfinished ...>
+[pid  1567] <... read resumed>"\371\260\332\334\276\261\32\352D\330y9n\277\333\224\231\35\"\374N\342\3642\240\261\267\342\311\0064\234"..., 40) = 40
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] <... read resumed>"\1", 1)  = 1
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\33\257\1\225\230R\375\271+k\34\16\253\202P\317\274"..., 242 <unfinished ...>
+[pid  1565] <... read resumed>"\263\177\1\356\33\230\267\317KhV\215=43z\222\22\22\220L?b\0\337\275\302\212\36\240>Z"..., 40) = 40
+[pid  1568] write(11, "\27\3\3\2r\256bARL\35\350\1\362\370?O\3665\2636qj\n\362\252Ec\220\376}\350"..., 631 <unfinished ...>
+[pid  1567] <... write resumed>)        = 242
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... write resumed>)        = 631
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\27\3\3\4\217", 5) = 5
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] read(12, "\371\260\332\334\276\261\32\353y\"\273\223\0\235\377Y\301\316\306.3X,\335\6\324#5Zc[\335"..., 1167) = 1167
+[pid  1568] getpid()                    = 1568
+[pid  1567] getsockname(8,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 394 <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... write resumed>)        = 394
+[pid  1565] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\324\340\265\277s\21z\304\221i\247\272\326\303\262\302\266"..., 242 <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] <... write resumed>)        = 242
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/fontawesome.min.css",  <unfinished ...>
+[pid  1568] close(11 <unfinished ...>
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/regular.min.css",  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=580, ...}, 0) = 0
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=80761, ...}, 0) = 0
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=655245485} /* 1970-01-01T03:27:06.655245485+0300 */, {tv_sec=1626, tv_nsec=655245485} /* 1970-01-01T03:27:06.655245485+0300 */], 0 <unfinished ...>
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/regular.min.css",  <unfinished ...>
+[pid  1565] <... read resumed>"\27\3\3\4\214", 5) = 5
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=580, ...}, 0) = 0
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/fontawesome.min.css",  <unfinished ...>
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38298), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1567] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/regular.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=80761, ...}, 0) = 0
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] <... read resumed>"\263\177\1\356\33\230\267\320s\16\340\363l2z\351\262\24\335o\0+\205\277\251>\35%\35\16\10#"..., 1164) = 1164
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/fontawesome.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=580, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] ioctl(15, TCGETS <unfinished ...>
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1567] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1565] getsockname(8,  <unfinished ...>
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1568] <... fcntl resumed>)        = 0
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 13
+[pid  1568] newfstatat(13, "", {st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] read(13, "@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=80761, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] write(12, "\27\3\3\2m\234\375\217<@\252\247\31[9N\300\334\220-\225\370\307\10\227\371\23ua\252A\237"..., 626 <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] ioctl(13, TCGETS <unfinished ...>
+[pid  1567] <... write resumed>)        = 626
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/solid.min.css",  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] write(12, "\27\3\3\2rd\33%\363wm\375\2\325\221>\357\257\302\"z\201_\1\367\364\355\322MF\2417"..., 631 <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=572, ...}, 0) = 0
+[pid  1567] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 404 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] <... write resumed>)        = 631
+[pid  1567] <... write resumed>)        = 404
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/solid.min.css",  <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=572, ...}, 0) = 0
+[pid  1567] close(12 <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/solid.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=659052208} /* 1970-01-01T03:27:06.659052208+0300 */, {tv_sec=1626, tv_nsec=659052208} /* 1970-01-01T03:27:06.659052208+0300 */], 0 <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38300), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=572, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1565] ioctl(13, TCGETS <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] read(13,  <unfinished ...>
+[pid  1566] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 408 <unfinished ...>
+[pid  1568] <... read resumed>"", 4096) = 0
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1565] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] <... write resumed>)        = 408
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] fcntl(12, F_GETFD <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1566] close(12 <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1566] <... close resumed>)        = 0
+[pid  1567] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 15
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=660044429} /* 1970-01-01T03:27:06.660044429+0300 */, {tv_sec=1626, tv_nsec=660044429} /* 1970-01-01T03:27:06.660044429+0300 */], 0 <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38310), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1568] lseek(13, 0, SEEK_SET)      = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] write(12, "\27\3\3\2j\251\t~\325\242\354S\227\331\233\255T)b\244k.\253\335_\3\6\227\224.*\215"..., 623 <unfinished ...>
+[pid  1568] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... write resumed>)        = 623
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] fcntl(12, F_GETFD <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... getsockopt resumed>[1], [4]) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1566] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] <... fcntl resumed>)        = 0
+[pid  1568] getpeername(11,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38298), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] <... openat resumed>)       = 15
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 402 <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1565] <... write resumed>)        = 402
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1565] close(13 <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1567] <... read resumed>"", 4096) = 0
+[pid  1565] close(12 <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1566] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] <... close resumed>)        = 0
+[pid  1566] close(13 <unfinished ...>
+[pid  1568] <... read resumed>"\1\0\0\271\3\3\30\225\350.vz|X\17\320\204\232U\223\r;\203E3K\337*\341\246\245A"..., 189) = 189
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=661844999} /* 1970-01-01T03:27:06.661844999+0300 */, {tv_sec=1626, tv_nsec=661844999} /* 1970-01-01T03:27:06.661844999+0300 */], 0 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38326), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] fcntl(12, F_GETFD <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_SET <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1565] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1566] <... openat resumed>)       = 13
+[pid  1565] <... fcntl resumed>)        = 0
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] read(13,  <unfinished ...>
+[pid  1567] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] <... getsockopt resumed>[1], [4]) = 0
+[pid  1565] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1567] getpeername(12,  <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38300), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] <... read resumed>"", 4096) = 0
+[pid  1565] close(13 <unfinished ...>
+[pid  1567] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1566] close(13 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1567] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\1\0\0\271\3\3\201\351I\225\231$i\371.e</2\346Vy\360D\243A:b\221\243$\f"..., 189) = 189
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3,&\317n\17\222\373\273\362\226\231u\272\375\275Q\304b\351\347g"..., 2186 <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... write resumed>)        = 2186
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] getpid()                    = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... read resumed>"\20\0\0! \212X0\214 \367\210\362\200\3\311@\t\256\321\3448.\265\r\36\321OT\27\203E"..., 37) = 37
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1566] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] <... read resumed>"\1", 1)  = 1
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] <... read resumed>"\204\314\177a\223\231\376F#(=\262\212~k\30\230\253\363H\220q\214\207tW\321\320\37p\246["..., 40) = 40
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1565] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... getsockopt resumed>[1], [4]) = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] write(12, "\26\3\3\0A\2\0\0=\3\3.h\361<\315\216\246\fg\177\371\10\232X\356\3009\257\263\7\203"..., 2186 <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\340\220\242\272v\361:\243\2\202\327\1\260ufe\346"..., 242 <unfinished ...>
+[pid  1567] <... write resumed>)        = 2186
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] <... write resumed>)        = 242
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] getpeername(12,  <unfinished ...>
+[pid  1565] <... read resumed>"", 4096) = 0
+[pid  1566] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38310), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] <... read resumed>"\27\3\3\4\220", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... read resumed>"\20\0\0! \271\4\250s\271\247\273\326\336\276\2\37,hh\306\325\261\210\5X\262\23\352\225\21\272"..., 37) = 37
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] <... read resumed>"\204\314\177a\223\231\376G9\347\301\307;,p\230\335\2470\320\240\0\263KY\3366\212\303rn\250"..., 1168) = 1168
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1565] <... openat resumed>)       = 13
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] getsockname(8,  <unfinished ...>
+[pid  1566] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] <... read resumed>"\1", 1)  = 1
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1567] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] <... read resumed>"\213\237\312 \6\347\4\37\243/\33\242{\334^\272C\341\375\334\213\326\260|`|g\272N\244\261\177"..., 40) = 40
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... read resumed>"\1\0\0\271\3\3%\177\232Ye\234W\311u6\314\231\356\273OX\314A6\330aw\212\340fY"..., 189) = 189
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] getpid()                    = 1567
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\tg\343\237\21\346\25:\235\231^\317<c\213\23\5"..., 242) = 242
+[pid  1567] read(12, "\27\3\3\4\222", 5) = 5
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... read resumed>"\213\237\312 \6\347\4 \201\341\347\277\270\305\232\200\263\21S\332\366_f\221\260\215X\252\215w\374\321"..., 1170) = 1170
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/brands.min.css",  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=18594, ...}, 0) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/brands.min.css",  <unfinished ...>
+[pid  1567] getsockname(8,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=18594, ...}, 0) = 0
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/brands.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=18594, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1568] ioctl(13, TCGETS <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1565] <... close resumed>)        = 0
+[pid  1565] getsockopt(12, SOL_SOCKET, SO_TYPE, [1], [4]) = 0
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/v4-shims.min.css",  <unfinished ...>
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=27593, ...}, 0) = 0
+[pid  1565] getpeername(12,  <unfinished ...>
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/v4-shims.min.css",  <unfinished ...>
+[pid  1565] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38326), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=27593, ...}, 0) = 0
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/fontawesome/v4-shims.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1568] write(11, "\27\3\3\2n\360\5\30\210\250\357r\31(\240\207\0103<vN\216\227\374\301\326\371gIJ!\247"..., 627 <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=27593, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1567] ioctl(15, TCGETS <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0A\2\0\0=\3\3\v%Q<\vn!\316\30\233\\\315h\221\321&`;s\243\7"..., 2186 <unfinished ...>
+[pid  1568] <... write resumed>)        = 627
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1566] <... write resumed>)        = 2186
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] <... read resumed>"\1\0\0\271\3\3q\331\214{\250\363~\247\32\221\236\232\351\10\1\364D\357y\2246\202=\340\374S"..., 189) = 189
+[pid  1566] <... read resumed>"\20\0\0! |\305v\256\30\244\20\336\370\241\255\363\251O?\330)\334n\365m\27!F\346U~"..., 37) = 37
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 403 <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... write resumed>)        = 403
+[pid  1567] write(12, "\27\3\3\2pQ%\346\246\224\275k\327\27\327]\362z\v\373R\323s&\324\253s\253]\177a\207"..., 629 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... write resumed>)        = 629
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1568] close(11 <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=669349376} /* 1970-01-01T03:27:06.669349376+0300 */, {tv_sec=1626, tv_nsec=669349376} /* 1970-01-01T03:27:06.669349376+0300 */], 0 <unfinished ...>
+[pid  1566] <... read resumed>"\1", 1)  = 1
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38336), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1567] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 405 <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] <... write resumed>)        = 405
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... read resumed>"w\305\10Z\275Y\204\374S\205Sd\207\32AG^\32\213\274\361\330\254\343\245&\0\364|\205\313\23"..., 40) = 40
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] close(12 <unfinished ...>
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC) = 0
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=669863817} /* 1970-01-01T03:27:06.669863817+0300 */, {tv_sec=1626, tv_nsec=669863817} /* 1970-01-01T03:27:06.669863817+0300 */], 0 <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\312t\327\30\"l\367a\t\324\303Xv\251\245y\""..., 242 <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1567] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38350), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... write resumed>)        = 242
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] <... read resumed>"\27\3\3\4\250", 5) = 5
+[pid  1568] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] fcntl(12, F_GETFD <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1565] write(12, "\26\3\3\0A\2\0\0=\3\3g\367\220\375\221\334\223\320\371\6\4\275;g\313\217\2262\3\1D"..., 2186 <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0
+[pid  1566] <... read resumed>"w\305\10Z\275Y\204\375\315\274F\364\236j\340Z\16\17C\37\205\275\340\335\270\272\10\320D\223\327\345"..., 1192) = 1192
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] <... write resumed>)        = 2186
+[pid  1568] getpid()                    = 1568
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1566] getsockname(8,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1565] <... read resumed>"\20\0\0! \306\0\233\1\350\t\v\200\3\36\n RV\337(\220(\331\254z\5\2131\t\242\v"..., 37) = 37
+[pid  1567] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] read(13,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1568] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap-datepicker/bootstrap-datepicker3.min.css",  <unfinished ...>
+[pid  1565] <... read resumed>"\1", 1)  = 1
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=21102, ...}, 0) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap-datepicker/bootstrap-datepicker3.min.css",  <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=21102, ...}, 0) = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"", 4096) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... read resumed>"\\\243}\351\364\273\17Uq\n\331\2363\216cJ\350\26n+\215\313\241\315W\264p\3152)\200\16"..., 40) = 40
+[pid  1568] close(13 <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/bootstrap-datepicker/bootstrap-datepicker3.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] <... openat resumed>)       = 13
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=21102, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1566] ioctl(13, TCGETS <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1565] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\177\356P\355%^|Z)_n)\306\352\333\"\f"..., 242 <unfinished ...>
+[pid  1566] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... write resumed>)        = 242
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... read resumed>"", 4096) = 0
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1565] <... read resumed>"\27\3\3\4\215", 5) = 5
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... read resumed>"\\\243}\351\364\273\17VcL\202\364\245X\357\313\v\22s\277k\230*\314\266\362h[0\210\302\344"..., 1165) = 1165
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] write(12, "\27\3\3\2}\31\350@\30\260\331\372!\323@\274KU\216.b\264\305\267qz(#\24A7\16"..., 642 <unfinished ...>
+[pid  1568] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] getsockname(8,  <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... write resumed>)        = 642
+[pid  1568] <... close resumed>)        = 0
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... getsockopt resumed>[1], [4]) = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1568] getpeername(11,  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38336), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] lseek(15, 0, SEEK_SET <unfinished ...>
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2.min.css",  <unfinished ...>
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] read(15,  <unfinished ...>
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1566] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 427 <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=14966, ...}, 0) = 0
+[pid  1568] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] <... write resumed>)        = 427
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2.min.css",  <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1567] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] close(13 <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... getsockopt resumed>[1], [4]) = 0
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=14966, ...}, 0) = 0
+[pid  1568] <... read resumed>"\1\0\0\271\3\0036)\206\2416~\352\304\217\201u\3041\262\376\250\326u5\200\304\301\37\323\364\2"..., 189) = 189
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] getpeername(12,  <unfinished ...>
+[pid  1566] close(12 <unfinished ...>
+[pid  1567] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38350), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1567] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=676271973} /* 1970-01-01T03:27:06.676271973+0300 */, {tv_sec=1626, tv_nsec=676271973} /* 1970-01-01T03:27:06.676271973+0300 */], 0 <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=14966, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1565] ioctl(13, TCGETS <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1567] <... read resumed>"\1\0\0\271\3\3!\370qd\r\227\220\10\206\352\326\347\322\35?\241\270;\311\300\\\312s\205=\354"..., 189) = 189
+[pid  1566] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38358), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1565] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] fcntl(12, F_GETFD <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... fcntl resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] write(12, "\27\3\3\2o\314xKmR\34\212\373\351\377\322\256\363q(E\0\5\376\212\30\240\\\25\243\1\311"..., 628 <unfinished ...>
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3R\257}Ei\374\333?\367\242\255x\260-\370w\335\353\24\346#"..., 2186 <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1565] <... write resumed>)        = 628
+[pid  1568] <... write resumed>)        = 2186
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1566] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] write(12, "\26\3\3\0A\2\0\0=\3\3_f\213\212\21\305\352\362\226/{\25DuW\3026W\230\33|"..., 2186 <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... read resumed>"\20\0\0! \337\242\207\36\232\225\265=K\5\200\322h\333$\5S$\251?\346C8\365\207\2;"..., 37) = 37
+[pid  1566] close(13 <unfinished ...>
+[pid  1567] <... write resumed>)        = 2186
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1565] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 400 <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] <... write resumed>)        = 400
+[pid  1568] <... read resumed>"\1", 1)  = 1
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] <... read resumed>"\342n-\363\f\375lO\3674\240K,X\263A\356\0024|]\2441\213\325\27Yh-\n\21f"..., 40) = 40
+[pid  1567] <... read resumed>"\20\0\0! -y\\\203X\360\375@\236e\316\22u\254\rn\244\200&\276L\21dyL%O"..., 37) = 37
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] close(12 <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=680500918} /* 1970-01-01T03:27:06.680500918+0300 */, {tv_sec=1626, tv_nsec=680500918} /* 1970-01-01T03:27:06.680500918+0300 */], 0 <unfinished ...>
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\312\3000\374\330\1\325Q\f\275\266cA\207\360\275\265"..., 242 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... write resumed>)        = 242
+[pid  1567] <... read resumed>"\1", 1)  = 1
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... read resumed>"\27\3\3\4\227", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1568] <... read resumed>"\342n-\363\f\375lP\305g\236\25\235,Lr\\+*|\307\16\24\315\325\256\366-\227\6\231\\"..., 1175) = 1175
+[pid  1565] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38364), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] getsockname(8,  <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] <... read resumed>"\366\244\32\263\26*\247\201b\335!\35\271\237\216\320,>/L\375\3470\362\355\220\321\16F@:a"..., 40) = 40
+[pid  1566] <... openat resumed>)       = 13
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1566] read(13,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] fcntl(12, F_GETFD <unfinished ...>
+[pid  1566] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\221\213\f\333\231\222>\240|\241\275\236\4\245H\212k"..., 242 <unfinished ...>
+[pid  1565] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1567] <... write resumed>)        = 242
+[pid  1565] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2-bootstrap.min.css",  <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] <... fcntl resumed>)        = 0
+[pid  1567] <... read resumed>"\27\3\3\4\207", 5) = 5
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=16792, ...}, 0) = 0
+[pid  1566] <... read resumed>"", 4096) = 0
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2-bootstrap.min.css",  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=16792, ...}, 0) = 0
+[pid  1566] close(13 <unfinished ...>
+[pid  1567] <... read resumed>"\366\244\32\263\26*\247\202\275\304~\353'\314\373\340\322\312\264\32\230u\247\242\27\207\310\331\7\306\331!"..., 1159) = 1159
+[pid  1565] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1568] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/select2/select2-bootstrap.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... openat resumed>)       = 13
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] getsockname(8,  <unfinished ...>
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=16792, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1566] <... openat resumed>)       = 13
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] ioctl(13, TCGETS <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1565] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] close(13)                   = 0
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/flags/flags16.css",  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=10904, ...}, 0) = 0
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/flags/flags16.css",  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1568] write(11, "\27\3\3\2y\222\277\252R\3\322\351\224}\274\305P\214y\f\240<\315<\340\10\271e\323\207M\5"..., 638 <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=10904, ...}, 0) = 0
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... write resumed>)        = 638
+[pid  1567] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/flags/flags16.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=10904, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] read(13,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] ioctl(15, TCGETS <unfinished ...>
+[pid  1566] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 410 <unfinished ...>
+[pid  1567] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] <... write resumed>)        = 410
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... close resumed>)        = 0
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] close(11 <unfinished ...>
+[pid  1566] <... getsockopt resumed>[1], [4]) = 0
+[pid  1568] <... close resumed>)        = 0
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=684760237} /* 1970-01-01T03:27:06.684760237+0300 */, {tv_sec=1626, tv_nsec=684760237} /* 1970-01-01T03:27:06.684760237+0300 */], 0 <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1567] write(12, "\27\3\3\2k\250\v\17\224\20\33_G7\26\331\352g\242\327\372Zp\333\222\366\37\232\367\0023\357"..., 624 <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] <... write resumed>)        = 624
+[pid  1566] getpeername(12,  <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38380), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 11
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38358), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1568] fcntl(11, F_GETFD <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1568] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1566] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1568] fcntl(11, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1567] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 394 <unfinished ...>
+[pid  1566] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1568] <... fcntl resumed>)        = 0
+[pid  1567] <... write resumed>)        = 394
+[pid  1565] <... read resumed>"", 4096) = 0
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] close(13 <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1567] close(12 <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... read resumed>"\1\0\0\271\3\3\2034e\300\341_\213\271\6\342\2\6\372\247\10\257j\244\275\253\5\f\3540s\320"..., 189) = 189
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=686347408} /* 1970-01-01T03:27:06.686347408+0300 */, {tv_sec=1626, tv_nsec=686347408} /* 1970-01-01T03:27:06.686347408+0300 */], 0 <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1565] <... openat resumed>)       = 13
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38392), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] fcntl(12, F_GETFD <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... fcntl resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] getpid()                    = 1568
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1567] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1568] read(13,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1568] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1567] getpid()                    = 1567
+[pid  1567] getpid()                    = 1567
+[pid  1568] read(13,  <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1568] <... read resumed>"", 4096) = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... close resumed>)        = 0
+[pid  1568] <... close resumed>)        = 0
+[pid  1568] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY) = 13
+[pid  1565] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0A\2\0\0=\3\3\343\211\362\345\"J%\361\2L\365\260\330C\202G_\241\331;H"..., 2186 <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] <... getsockopt resumed>[1], [4]) = 0
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... write resumed>)        = 2186
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1566] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1565] getpeername(12,  <unfinished ...>
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... read resumed>"\20\0\0! '\222/\217\t!\237\374E \263\321\377\223.\357\2o \34W^\21L^t\211"..., 37) = 37
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... read resumed>"", 4096) = 0
+[pid  1565] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38364), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1568] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] read(13,  <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1566] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1568] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1568] getsockopt(11, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... read resumed>"\1", 1)  = 1
+[pid  1565] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1568] <... getsockopt resumed>[1], [4]) = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1568] getsockname(11,  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1568] getpeername(11,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38380), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1566] <... read resumed>"1je\341\r  Yx\177\330\253\220\244\36\370\363\353\320\343P\37`A\364\215\236\371\340\367\271m"..., 40) = 40
+[pid  1568] ioctl(11, FIONBIO, [0] <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1568] <... ioctl resumed>)        = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] setsockopt(11, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... read resumed>"\1\0\0\271\3\3\200\356\331\373\367\226?\353\360\252\325\231\22\236\31\177\5\353 \5\271\271\243z]\221"..., 189) = 189
+[pid  1568] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_SET <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260-\362\352X\0H\7\v\351\306\302}B\10\212\247\347"..., 242 <unfinished ...>
+[pid  1568] <... read resumed>"\1\0\0\271\3\3\231\31aLL\236\352\377<*\270J\5w\325\36\335H\230\260\320\263\300\261v\227"..., 189) = 189
+[pid  1567] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... write resumed>)        = 242
+[pid  1567] close(15 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] <... read resumed>"\27\3\3\4q", 5) = 5
+[pid  1567] <... getsockopt resumed>[1], [4]) = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1566] <... read resumed>"1je\341\r  Z\222e\25Rb\357#F\355=\270\372P\233e\371\20\213n\277v\f\350\231"..., 1137) = 1137
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpeername(12, {sa_family=AF_INET, sin_port=htons(38392), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1566] getsockname(8,  <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1568] getpid()                    = 1568
+[pid  1567] read(12, "\26\3\1\0\275", 5) = 5
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] <... read resumed>"\1\0\0\271\3\3Q\3025\344\1\367\330\211\343\243\301Vf\264m\224D\2\f+\305\216\31\357\2010"..., 189) = 189
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/ab.css", {st_mode=S_IFREG|0600, st_size=643, ...}, 0) = 0
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/ab.css", {st_mode=S_IFREG|0600, st_size=643, ...}, 0) = 0
+[pid  1566] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/flask_appbuilder/static/appbuilder/css/ab.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] write(12, "\26\3\3\0A\2\0\0=\3\3\344\253,\1\333\374\345\4\5\370\361\201\3703\371r\t\214\362\375Q"..., 2186 <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=643, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] ioctl(13, TCGETS <unfinished ...>
+[pid  1565] <... write resumed>)        = 2186
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1568] write(11, "\26\3\3\0A\2\0\0=\3\3\265\0055\274\225\346\234\36\240A\320)\254X'\24\317\244_\354\237"..., 2186 <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... write resumed>)        = 2186
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] <... read resumed>"\20\0\0! C\353\17\313\325\340\357\202j\260\"\356u\33\265(\2715k\7>Bk\341|\263%"..., 37) = 37
+[pid  1568] <... read resumed>"\20\0\0! \270\335\233q\35\222\237\230\336\262\323\316\275\317\37\200\232\262m\31\360<\217\240\213\243q"..., 37) = 37
+[pid  1567] write(12, "\26\3\3\0A\2\0\0=\3\3\fZ/ {Kw`\275\323\243^y\207K\257\210\352\353\260Z"..., 2186) = 2186
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1565] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1568] read(11,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"\1", 1)  = 1
+[pid  1566] write(12, "\27\3\3\2c\17\2200D\327\357\254\334\31\210LI\t\345]w\3076\2\225\356\313\221\337\367\337\372"..., 616 <unfinished ...>
+[pid  1565] <... read resumed>"\1", 1)  = 1
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1568] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1566] <... write resumed>)        = 616
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"\256\261\212\254\331\372\0+p\347.\179\370i\336\254\355\222\304\1:\230\37B\221*jM\36\254_"..., 40) = 40
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\20\0\0! ^\3576\321\330\201\213)n\231\327/\366\364y/H\261G3\333\214\322$\nh\240"..., 37) = 37
+[pid  1565] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1565] <... read resumed>"0\262m{\f\205W\37\262\271\25\366c\205{06\254\206\267\346\222\373\2625CO=\341\1\10p"..., 40) = 40
+[pid  1568] write(11, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260<\17\224Zo\n/[\335\365uz\217U\250[\273"..., 242 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... write resumed>)        = 242
+[pid  1567] <... read resumed>"\1", 1)  = 1
+[pid  1565] getpid( <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] <... read resumed>"\27\3\3\4\213", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1566] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 383 <unfinished ...>
+[pid  1568] read(11,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1568] <... read resumed>"\256\261\212\254\331\372\0,3-\r\"\0162\\\305q\321\267\27\322\353\264\26\220t9\217\364\259\36"..., 1163) = 1163
+[pid  1566] <... write resumed>)        = 383
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... read resumed>"\210\214.\222\377\200.N\304\307\t\352kK#\260\"_`L]Q\277eo\324B\36\260\310yz"..., 40) = 40
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\272u\6\377\22m\30\310\344\4?519\237~U"..., 242 <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] close(12 <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... write resumed>)        = 242
+[pid  1567] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\275P\204E\341[\232R\220N\210-st74\316"..., 242 <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... write resumed>)        = 242
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=694818020} /* 1970-01-01T03:27:06.694818020+0300 */, {tv_sec=1626, tv_nsec=694818020} /* 1970-01-01T03:27:06.694818020+0300 */], 0 <unfinished ...>
+[pid  1565] <... read resumed>"\27\3\3\4\221", 5) = 5
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1567] <... read resumed>"\27\3\3\4\177", 5) = 5
+[pid  1565] read(12,  <unfinished ...>
+[pid  1568] getsockname(8,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1568] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] <... read resumed>"\210\214.\222\377\200.O\211,\2235\371\205\\0\315\317\20T:\206\350\36k\362^*5\314\236\221"..., 1151) = 1151
+[pid  1565] <... read resumed>"0\262m{\f\205W \334\10H\2126\27 \274\2p\345&u\17e\177\7\230\342X\342\210\332U"..., 1169) = 1169
+[pid  1566] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38398), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] getsockname(12, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] getsockname(8,  <unfinished ...>
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] getsockname(8,  <unfinished ...>
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1566] fcntl(12, F_GETFD)          = 0x1 (flags FD_CLOEXEC)
+[pid  1566] fcntl(12, F_SETFD, FD_CLOEXEC) = 0
+[pid  1566] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY) = 13
+[pid  1566] newfstatat(13, "", {st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/main.fb487bd34c7cd20f02bc.css",  <unfinished ...>
+[pid  1566] read(13,  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=7304, ...}, 0) = 0
+[pid  1566] <... read resumed>"@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/main.fb487bd34c7cd20f02bc.css",  <unfinished ...>
+[pid  1566] close(13 <unfinished ...>
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/materialIcons.b2aed9f877c993431fde.css",  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=7304, ...}, 0) = 0
+[pid  1566] <... close resumed>)        = 0
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/airflowDefaultTheme.f664c2f31c2dd026f579.css",  <unfinished ...>
+[pid  1567] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/main.fb487bd34c7cd20f02bc.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=105176, ...}, 0) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/airflowDefaultTheme.f664c2f31c2dd026f579.css",  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=105176, ...}, 0) = 0
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=111666, ...}, 0) = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/materialIcons.b2aed9f877c993431fde.css",  <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/airflowDefaultTheme.f664c2f31c2dd026f579.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=111666, ...}, 0) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/materialIcons.b2aed9f877c993431fde.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1568] <... openat resumed>)       = 13
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=105176, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1568] newfstatat(13, "",  <unfinished ...>
+[pid  1565] ioctl(13, TCGETS <unfinished ...>
+[pid  1568] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=111666, ...}, AT_EMPTY_PATH) = 0
+[pid  1568] ioctl(13, TCGETS <unfinished ...>
+[pid  1565] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=7304, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] ioctl(15, TCGETS <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1568] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1567] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1568] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] read(13, "-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1568] <... lseek resumed>)        = 0
+[pid  1567] lseek(15, 0, SEEK_CUR)      = 0
+[pid  1566] read(13, "", 4096)          = 0
+[pid  1566] close(13)                   = 0
+[pid  1566] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY) = 13
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] write(12, "\27\3\3\2\215\211\31ib}Y\376_\367\372N\275b\367H\301\205\31\331\5?\31\367M\37f\322"..., 658 <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... write resumed>)        = 658
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1567] write(12, "\27\3\3\2{\331\367\203\24\273\27\35\265\216,R\243\273b_\230\244\1\300D\343!\257\361K\237H"..., 640 <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... write resumed>)        = 640
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 411 <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1568] write(11, "\27\3\3\2\207S\t\10(\25\3775\356\242,K\214s\207VA\337M\216A\214\373\260\236\247\253\1"..., 652 <unfinished ...>
+[pid  1567] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 396 <unfinished ...>
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] <... write resumed>)        = 411
+[pid  1567] <... write resumed>)        = 396
+[pid  1566] read(13,  <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] close(12 <unfinished ...>
+[pid  1566] close(13 <unfinished ...>
+[pid  1565] close(12 <unfinished ...>
+[pid  1568] <... write resumed>)        = 652
+[pid  1566] <... close resumed>)        = 0
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1568] getpid( <unfinished ...>
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=698537669} /* 1970-01-01T03:27:06.698537669+0300 */, {tv_sec=1626, tv_nsec=698537669} /* 1970-01-01T03:27:06.698537669+0300 */], 0 <unfinished ...>
+[pid  1566] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=698571284} /* 1970-01-01T03:27:06.698571284+0300 */, {tv_sec=1626, tv_nsec=698571284} /* 1970-01-01T03:27:06.698571284+0300 */], 0 <unfinished ...>
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1566] <... getsockopt resumed>[1], [4]) = 0
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1568] getpid( <unfinished ...>
+[pid  1566] getsockname(12,  <unfinished ...>
+[pid  1565] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38404), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1568] <... getpid resumed>)       = 1568
+[pid  1566] getpeername(12,  <unfinished ...>
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1568] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 405 <unfinished ...>
+[pid  1566] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38398), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1568] <... write resumed>)        = 405
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1568] close(13 <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1566] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] <... accept4 resumed>{sa_family=AF_INET, sin_port=htons(38420), sin_addr=inet_addr("10.50.84.20")}, [16], SOCK_CLOEXEC) = 12
+[pid  1566] <... ioctl resumed>)        = 0
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1565] fcntl(12, F_GETFD <unfinished ...>
+[pid  1568] close(11 <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1566] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1565] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] <... close resumed>)        = 0
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=699441953} /* 1970-01-01T03:27:06.699441953+0300 */, {tv_sec=1626, tv_nsec=699441953} /* 1970-01-01T03:27:06.699441953+0300 */], 0 <unfinished ...>
+[pid  1565] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1565] <... fcntl resumed>)        = 0
+[pid  1568] accept4(8,  <unfinished ...>
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1568] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1567] fcntl(12, F_GETFD <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1568] getppid( <unfinished ...>
+[pid  1567] <... fcntl resumed>)        = 0x1 (flags FD_CLOEXEC)
+[pid  1568] <... getppid resumed>)      = 1249
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1568] utimensat(12, NULL, [{tv_sec=1626, tv_nsec=699760085} /* 1970-01-01T03:27:06.699760085+0300 */, {tv_sec=1626, tv_nsec=699760085} /* 1970-01-01T03:27:06.699760085+0300 */], 0 <unfinished ...>
+[pid  1567] fcntl(12, F_SETFD, FD_CLOEXEC <unfinished ...>
+[pid  1566] <... read resumed>"\1\0\0\271\3\3GhfW\301\307\303Y\333\357Pr9\251\276\354\177J\3470\221<\271\356V6"..., 189) = 189
+[pid  1568] <... utimensat resumed>)    = 0
+[pid  1565] <... openat resumed>)       = 13
+[pid  1568] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1565] read(13, "@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] close(13)                   = 0
+[pid  1567] <... fcntl resumed>)        = 0
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1566] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] openat(AT_FDCWD, "/etc/crypto-policies/back-ends/openssl.config", O_RDONLY <unfinished ...>
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] newfstatat(15, "", {st_mode=S_IFREG|0644, st_size=151, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] read(15, "@SECLEVEL=2:kEECDH:kRSA:kEDH:kPS"..., 4096) = 151
+[pid  1567] close(15)                   = 0
+[pid  1567] getpid()                    = 1567
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1567] getpid()                    = 1567
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1565] getpid()                    = 1565
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY) = 15
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/cert.crt", O_RDONLY <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0A\2\0\0=\3\3\340Q\312D\276\6\20\202\242\20\r\256\371\v\"\301;\355\362\34{"..., 2186 <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... openat resumed>)       = 13
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] <... write resumed>)        = 2186
+[pid  1567] <... read resumed>"-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=2516, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] read(13, "-----BEGIN CERTIFICATE-----\r\nMII"..., 4096) = 2516
+[pid  1567] read(15, "", 4096)          = 0
+[pid  1566] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1567] close(15 <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] <... read resumed>"\20\0\0! \306l\354\351\27e\264\247_v=l\3116\33^MD\203\30\257\302TU\225\10a"..., 37) = 37
+[pid  1567] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1565] <... read resumed>"", 4096) = 0
+[pid  1567] <... openat resumed>)       = 15
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] <... read resumed>"\1", 1)  = 1
+[pid  1565] <... close resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] openat(AT_FDCWD, "/app/airflow/v210/certs/private.key", O_RDONLY <unfinished ...>
+[pid  1566] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... read resumed>"\355A\225\234\352`\277'\22iQi\350\23\35m\377.\367\354\26Z\243 \232\225t&\256)b\355"..., 40) = 40
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_SET <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1567] read(15,  <unfinished ...>
+[pid  1566] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\23\341,\327f\223\247-\220SOb\351\316\327\34\220"..., 242 <unfinished ...>
+[pid  1567] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] <... write resumed>)        = 242
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1566] read(12,  <unfinished ...>
+[pid  1567] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1566] <... read resumed>"\27\3\3\4\206", 5) = 5
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1566] read(12,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... getsockopt resumed>[1], [4]) = 0
+[pid  1566] <... read resumed>"\355A\225\234\352`\277(\371\214\24\212\372\265\257\275\"-h\1$P\255\3231\257\26Ik\371\353\211"..., 1158) = 1158
+[pid  1565] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1567] getsockname(12,  <unfinished ...>
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1565] newfstatat(13, "",  <unfinished ...>
+[pid  1567] getpeername(12,  <unfinished ...>
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0444, st_size=1679, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... getpeername resumed>{sa_family=AF_INET, sin_port=htons(38420), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1566] getsockname(8,  <unfinished ...>
+[pid  1565] lseek(13, 0, SEEK_SET <unfinished ...>
+[pid  1567] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1566] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] <... lseek resumed>)        = 0
+[pid  1567] <... ioctl resumed>)        = 0
+[pid  1565] read(13,  <unfinished ...>
+[pid  1567] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1565] <... read resumed>"-----BEGIN RSA PRIVATE KEY-----\n"..., 4096) = 1679
+[pid  1567] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] close(13 <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1565] <... close resumed>)        = 0
+[pid  1565] getsockopt(12, SOL_SOCKET, SO_TYPE,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] <... getsockopt resumed>[1], [4]) = 0
+[pid  1567] <... read resumed>"\1\0\0\271\3\3\236\234g\243\322\244h\36rGn.\260\344\307\200Xo\302|\365\320\321C\211\332"..., 189) = 189
+[pid  1565] getsockname(12,  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("10.50.84.20")}, [128 => 16]) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] getpeername(12, {sa_family=AF_INET, sin_port=htons(38404), sin_addr=inet_addr("10.50.84.20")}, [16]) = 0
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] ioctl(12, FIONBIO, [0] <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... ioctl resumed>)        = 0
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/loadingDots.919e5f1534f5f57b7eb4.css",  <unfinished ...>
+[pid  1565] setsockopt(12, SOL_TCP, TCP_ULP, [7564404], 4 <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=1244, ...}, 0) = 0
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... setsockopt resumed>)   = -1 ENOENT (No such file or directory)
+[pid  1566] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/loadingDots.919e5f1534f5f57b7eb4.css",  <unfinished ...>
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=1244, ...}, 0) = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... read resumed>"\26\3\1\0\275", 5) = 5
+[pid  1566] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/loadingDots.919e5f1534f5f57b7eb4.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1566] <... openat resumed>)       = 13
+[pid  1565] <... read resumed>"\1\0\0\271\3\3O\347\350\327\205\4\t\256\32\23J|\305\16\311\313P\233\177l\227\216\235\23\360\253"..., 189) = 189
+[pid  1566] newfstatat(13, "",  <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=1244, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] ioctl(13, TCGETS, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1565] getpid( <unfinished ...>
+[pid  1566] lseek(13, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1566] <... lseek resumed>)        = 0
+[pid  1565] getpid()                    = 1565
+[pid  1565] getpid()                    = 1565
+[pid  1567] write(12, "\26\3\3\0A\2\0\0=\3\3t\305\366\365a\362\2\3554d;\35\307B1\0231\336=[\247"..., 2186) = 2186
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] write(12, "\27\3\3\2\202\270\370\324\177\205\313^\334w\301\371M\\\365Svx|\3000\0326\364P\2145\306"..., 647) = 647
+[pid  1566] getpid()                    = 1566
+[pid  1567] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1566] getpid( <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... getpid resumed>)       = 1566
+[pid  1567] <... read resumed>"\20\0\0! \267\336K\332\244tTv\305@m\226\243P\212RR\333!\32\305\370\263\233\23\274\215"..., 37) = 37
+[pid  1566] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 403) = 403
+[pid  1566] close(13 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1567] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1566] close(12 <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] <... close resumed>)        = 0
+[pid  1565] write(12, "\26\3\3\0A\2\0\0=\3\3\222\240o\24e\344\315\320\250I\31\230\217f\240\34\227\364*\0013"..., 2186 <unfinished ...>
+[pid  1567] <... read resumed>"\1", 1)  = 1
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=706395782} /* 1970-01-01T03:27:06.706395782+0300 */, {tv_sec=1626, tv_nsec=706395782} /* 1970-01-01T03:27:06.706395782+0300 */], 0 <unfinished ...>
+[pid  1565] <... write resumed>)        = 2186
+[pid  1567] read(12,  <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] read(12, "\370\1vf\243\302\266\344\356\307\4\33l\336B=*\235\370\\S\17Z\20\224%T`p\177L\370"..., 40) = 40
+[pid  1565] <... read resumed>"\26\3\3\0%", 5) = 5
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1565] <... read resumed>"\20\0\0! \223gB\374?\315\27\244\223\315\231wj\372\272\32\375V\203\321\263\224vp\323\246\24"..., 37) = 37
+[pid  1567] getpid( <unfinished ...>
+[pid  1566] accept4(8,  <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1566] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\236\371\306\300\326\26am\240I\234\16`c\2642\251"..., 242 <unfinished ...>
+[pid  1566] getppid( <unfinished ...>
+[pid  1565] <... read resumed>"\24\3\3\0\1", 5) = 5
+[pid  1567] <... write resumed>)        = 242
+[pid  1566] <... getppid resumed>)      = 1249
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] utimensat(10, NULL, [{tv_sec=1626, tv_nsec=707115877} /* 1970-01-01T03:27:06.707115877+0300 */, {tv_sec=1626, tv_nsec=707115877} /* 1970-01-01T03:27:06.707115877+0300 */], 0 <unfinished ...>
+[pid  1565] <... read resumed>"\1", 1)  = 1
+[pid  1567] <... read resumed>"\27\3\3\4\200", 5) = 5
+[pid  1566] <... utimensat resumed>)    = 0
+[pid  1565] read(12,  <unfinished ...>
+[pid  1567] read(12,  <unfinished ...>
+[pid  1566] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1565] <... read resumed>"\26\3\3\0(", 5) = 5
+[pid  1567] <... read resumed>"\370\1vf\243\302\266\345\233!c\32\224f\242\375\362\220\377\r\274+\245@\3723f\22B\3764\330"..., 1152) = 1152
+[pid  1565] read(12, "\300L\253\255sU\257\224\302\264\0q\273\35\361\221;gA\367\3264\362\344\265\217\30,\245\320\36\321"..., 40) = 40
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] getsockname(8,  <unfinished ...>
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getsockname resumed>{sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1565] write(12, "\26\3\3\0\272\4\0\0\266\0\0\34 \0\260\211$\361\272{\22\267s\245\364\333D\345\247i\20\245"..., 242) = 242
+[pid  1565] read(12, "\27\3\3\4\203", 5) = 5
+[pid  1565] read(12, "\300L\253\255sU\257\225\1\352o\26\30\203\26\10+\342\250\230\306\177z\206\332\17\16R\204 \4\33"..., 1155) = 1155
+[pid  1565] getsockname(8, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("0.0.0.0")}, [16]) = 0
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/flash.65805954dad3c27a3986.css", {st_mode=S_IFREG|0600, st_size=1276, ...}, 0) = 0
+[pid  1567] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/flash.65805954dad3c27a3986.css", {st_mode=S_IFREG|0600, st_size=1276, ...}, 0) = 0
+[pid  1567] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/flash.65805954dad3c27a3986.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/bootstrap-datetimepicker.min.css",  <unfinished ...>
+[pid  1567] <... openat resumed>)       = 15
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=7718, ...}, 0) = 0
+[pid  1567] newfstatat(15, "",  <unfinished ...>
+[pid  1565] newfstatat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/bootstrap-datetimepicker.min.css",  <unfinished ...>
+[pid  1567] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=1276, ...}, AT_EMPTY_PATH) = 0
+[pid  1565] <... newfstatat resumed>{st_mode=S_IFREG|0600, st_size=7718, ...}, 0) = 0
+[pid  1565] openat(AT_FDCWD, "/home/airflow/v210/.local/lib/python3.12/site-packages/airflow/www/static/dist/bootstrap-datetimepicker.min.css", O_RDONLY|O_CLOEXEC <unfinished ...>
+[pid  1567] ioctl(15, TCGETS <unfinished ...>
+[pid  1565] <... openat resumed>)       = 13
+[pid  1565] newfstatat(13, "", {st_mode=S_IFREG|0600, st_size=7718, ...}, AT_EMPTY_PATH) = 0
+[pid  1567] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1565] ioctl(13, TCGETS <unfinished ...>
+[pid  1567] lseek(15, 0, SEEK_CUR <unfinished ...>
+[pid  1565] <... ioctl resumed>, 0x7fffff1e3270) = -1 ENOTTY (Inappropriate ioctl for device)
+[pid  1567] <... lseek resumed>)        = 0
+[pid  1565] lseek(13, 0, SEEK_CUR)      = 0
+[pid  1567] write(12, "\27\3\3\2|\375)V\177\301\373\0-\232\34\332\\[J\233\235\227\201\237\235\177O\22\26\350\262\333"..., 641) = 641
+[pid  1565] write(12, "\27\3\3\2\177\365=\241g?>\177\21\357\33\326\2022Z\"\327\352\224\"\363\271\275\372\4\7S\201"..., 644) = 644
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] getpid( <unfinished ...>
+[pid  1565] getpid( <unfinished ...>
+[pid  1567] <... getpid resumed>)       = 1567
+[pid  1565] <... getpid resumed>)       = 1565
+[pid  1567] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 397 <unfinished ...>
+[pid  1565] write(14, "10.50.84.105 - - [11/Dec/2025:13"..., 399 <unfinished ...>
+[pid  1567] <... write resumed>)        = 397
+[pid  1565] <... write resumed>)        = 399
+[pid  1565] close(13 <unfinished ...>
+[pid  1567] close(15 <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] close(12 <unfinished ...>
+[pid  1567] close(12 <unfinished ...>
+[pid  1565] <... close resumed>)        = 0
+[pid  1567] <... close resumed>)        = 0
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=710744040} /* 1970-01-01T03:27:06.710744040+0300 */, {tv_sec=1626, tv_nsec=710744040} /* 1970-01-01T03:27:06.710744040+0300 */], 0) = 0
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=710814807} /* 1970-01-01T03:27:06.710814807+0300 */, {tv_sec=1626, tv_nsec=710814807} /* 1970-01-01T03:27:06.710814807+0300 */], 0 <unfinished ...>
+[pid  1565] accept4(8,  <unfinished ...>
+[pid  1567] <... utimensat resumed>)    = 0
+[pid  1565] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1565] getppid( <unfinished ...>
+[pid  1567] accept4(8,  <unfinished ...>
+[pid  1565] <... getppid resumed>)      = 1249
+[pid  1567] <... accept4 resumed>0x7fffff1e4020, [16], SOCK_CLOEXEC) = -1 EAGAIN (Resource temporarily unavailable)
+[pid  1565] utimensat(9, NULL, [{tv_sec=1626, tv_nsec=711062112} /* 1970-01-01T03:27:06.711062112+0300 */, {tv_sec=1626, tv_nsec=711062112} /* 1970-01-01T03:27:06.711062112+0300 */], 0 <unfinished ...>
+[pid  1567] getppid( <unfinished ...>
+[pid  1565] <... utimensat resumed>)    = 0
+[pid  1567] <... getppid resumed>)      = 1249
+[pid  1565] pselect6(11, [8 10], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1567] utimensat(11, NULL, [{tv_sec=1626, tv_nsec=711183330} /* 1970-01-01T03:27:06.711183330+0300 */, {tv_sec=1626, tv_nsec=711183330} /* 1970-01-01T03:27:06.711183330+0300 */], 0) = 0
+[pid  1567] pselect6(10, [8 9], NULL, NULL, {tv_sec=50, tv_nsec=0}, NULL <unfinished ...>
+[pid  1077] <... clock_nanosleep resumed>NULL) = 0
+[pid  1077] openat(AT_FDCWD, "/proc/1249/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "1249 (gunicorn: maste) S 1077 10"..., 8192) = 306
+[pid  1077] read(4, "", 7886)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/1249/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "1249 (gunicorn: maste) S 1077 10"..., 8192) = 306
+[pid  1077] read(4, "", 7886)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/1249/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "1249 (gunicorn: maste) S 1077 10"..., 8192) = 306
+[pid  1077] read(4, "", 7886)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFDIR|0555, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] getdents64(4, 0x165e3990 /* 390 entries */, 32768) = 9992
+[pid  1077] getdents64(4, 0x165e3990 /* 0 entries */, 32768) = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/1/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "1 (systemd) S 0 1 1 0 -1 4194560"..., 8192) = 189
+[pid  1077] read(4, "", 8003)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/2/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "2 (kthreadd) S 0 0 0 0 -1 212998"..., 8192) = 150
+[pid  1077] read(4, "", 8042)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/3/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "3 (pool_workqueue_release) S 2 0"..., 8192) = 165
+[pid  1077] read(4, "", 8027)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/4/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "4 (kworker/R-kvfree_rcu_reclaim)"..., 8192) = 173
+[pid  1077] read(4, "", 8019)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/5/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "5 (kworker/R-rcu_gp) I 2 0 0 0 -"..., 8192) = 161
+[pid  1077] read(4, "", 8031)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/6/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "6 (kworker/R-sync_wq) I 2 0 0 0 "..., 8192) = 162
+[pid  1077] read(4, "", 8030)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/7/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "7 (kworker/R-slub_flushwq) I 2 0"..., 8192) = 167
+[pid  1077] read(4, "", 8025)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/8/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "8 (kworker/R-netns) I 2 0 0 0 -1"..., 8192) = 160
+[pid  1077] read(4, "", 8032)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/10/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "10 (kworker/0:0H-events_highpri)"..., 8192) = 173
+[pid  1077] read(4, "", 8019)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/12/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "12 (kworker/u64:0-ipv6_addrconf)"..., 8192) = 172
+[pid  1077] read(4, "", 8020)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/13/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "13 (kworker/R-mm_percpu_wq) I 2 "..., 8192) = 168
+[pid  1077] read(4, "", 8024)           = 0
+[pid  1077] close(4)                    = 0
+[pid  1077] openat(AT_FDCWD, "/proc/14/stat", O_RDONLY|O_CLOEXEC) = 4
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] lseek(4, 0, SEEK_CUR)       = 0
+[pid  1077] newfstatat(4, "", {st_mode=S_IFREG|0444, st_size=0, ...}, AT_EMPTY_PATH) = 0
+[pid  1077] read(4, "14 (rcu_tasks_kthread) I 2 0 0 0"..., 8192) = 161
