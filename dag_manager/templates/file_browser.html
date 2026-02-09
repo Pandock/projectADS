@@ -1,0 +1,153 @@
+{% extends 'airflow/main.html' %}
+
+{% block page_title %}DAG File Manager{% endblock %}
+
+{% block head_css %}
+  {{ super() }}
+  <link rel="stylesheet" href="/static/dag_manager/css/dag_manager.css">
+{% endblock %}
+
+{% block content %}
+  <h2>DAG File Manager</h2>
+  
+  {% if mounts|length > 1 %}
+  <div class="mount-selector">
+      <label for="mountSelect">Mount point:</label>
+      <select id="mountSelect" onchange="changeMount()">
+          {% for mount_name, mount_path in mounts.items() %}
+          <option value="{{ mount_name }}">{{ mount_name }} ({{ mount_path }})</option>
+          {% endfor %}
+      </select>
+  </div>
+  {% endif %}
+  
+  <p class="text-muted">Current mount: <code id="currentMount"></code></p>
+  
+  <!-- Breadcrumb Navigation with action buttons -->
+  <div class="breadcrumb-nav" id="breadcrumb">
+      <span>Loading...</span>
+  </div>
+  
+  <!-- Main Container -->
+  <div class="dag-manager-container">
+      <!-- Sidebar with folder tree -->
+      <div class="sidebar" id="sidebar">
+          <div class="loading">Loading...</div>
+      </div>
+      
+      <!-- Content area -->
+      <div class="content-area" id="content">
+          <div class="empty-state">📂 Select a folder or file to view its contents</div>
+      </div>
+  </div>
+  
+  <!-- Modal для создания файла -->
+  <div class="modal-overlay" id="createFileModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3>Create New File</h3>
+          </div>
+          <div class="modal-body">
+              <label for="fileNameInput">File Name:</label>
+              <input type="text" id="fileNameInput" placeholder="example.py">
+              <div class="error-message" id="fileNameError"></div>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button secondary" onclick="hideCreateFileModal()">Cancel</button>
+              <button class="modal-button primary" onclick="createFile()">Create</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Modal для создания папки -->
+  <div class="modal-overlay" id="createFolderModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3>Create New Folder</h3>
+          </div>
+          <div class="modal-body">
+              <label for="folderNameInput">Folder Name:</label>
+              <input type="text" id="folderNameInput" placeholder="my_folder">
+              <div class="error-message" id="folderNameError"></div>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button secondary" onclick="hideCreateFolderModal()">Cancel</button>
+              <button class="modal-button primary" onclick="createFolder()">Create</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Modal для переименования -->
+  <div class="modal-overlay" id="renameModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3>Rename Item</h3>
+          </div>
+          <div class="modal-body">
+              <label for="renameInput">New Name:</label>
+              <input type="text" id="renameInput" placeholder="new_name">
+              <div class="error-message" id="renameError"></div>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button secondary" onclick="hideRenameModal()">Cancel</button>
+              <button class="modal-button primary" onclick="confirmRename()">Rename</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Modal для подтверждения удаления -->
+  <div class="modal-overlay" id="confirmDeleteModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3 style="color: #dc3545;">⚠️ Confirm Delete</h3>
+          </div>
+          <div class="modal-body">
+              <p id="deleteMessage" style="color: #333;"></p>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button secondary" onclick="hideConfirmDeleteModal()">Cancel</button>
+              <button class="modal-button primary" style="background: #dc3545;" onclick="deleteItem()">Delete</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Modal для ошибок -->
+  <div class="modal-overlay" id="errorModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3 style="color: #dc3545;">❌ Error</h3>
+          </div>
+          <div class="modal-body">
+              <p id="errorMessage" style="color: #333;"></p>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button primary" onclick="hideErrorModal()">OK</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Modal для успешных операций -->
+  <div class="modal-overlay" id="successModal">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h3 style="color: #28a745;">✅ Success</h3>
+          </div>
+          <div class="modal-body">
+              <p id="successMessage" style="color: #333;"></p>
+          </div>
+          <div class="modal-footer">
+              <button class="modal-button primary" onclick="hideSuccessModal()">OK</button>
+          </div>
+      </div>
+  </div>
+  
+  <!-- Передаем данные в JavaScript -->
+  <script>
+    window.DAG_MANAGER_MOUNTS = {{ mounts|tojson }};
+  </script>
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+  <script src="/static/dag_manager/js/dag_manager.js"></script>
+{% endblock %}
