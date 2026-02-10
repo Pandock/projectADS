@@ -4,7 +4,7 @@
 
 {% block head_css %}
   {{ super() }}
-  <link rel="stylesheet" href="/static/dag_manager/css/dag_manager.css">
+  <link rel="stylesheet" href="{{ url_for('dag_manager_blueprint.static', filename='css/dag_manager.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -51,6 +51,9 @@
               <label for="fileNameInput">File Name:</label>
               <input type="text" id="fileNameInput" placeholder="example.py">
               <div class="error-message" id="fileNameError"></div>
+              <p style="font-size: 12px; color: #6c757d; margin-top: 8px;">
+                  Allowed: Cyrillic, Latin, digits, ( ) . , space - _ +
+              </p>
           </div>
           <div class="modal-footer">
               <button class="modal-button secondary" onclick="hideCreateFileModal()">Cancel</button>
@@ -69,6 +72,9 @@
               <label for="folderNameInput">Folder Name:</label>
               <input type="text" id="folderNameInput" placeholder="my_folder">
               <div class="error-message" id="folderNameError"></div>
+              <p style="font-size: 12px; color: #6c757d; margin-top: 8px;">
+                  Allowed: Cyrillic, Latin, digits, ( ) . , space - _ +
+              </p>
           </div>
           <div class="modal-footer">
               <button class="modal-button secondary" onclick="hideCreateFolderModal()">Cancel</button>
@@ -87,6 +93,9 @@
               <label for="renameInput">New Name:</label>
               <input type="text" id="renameInput" placeholder="new_name">
               <div class="error-message" id="renameError"></div>
+              <p style="font-size: 12px; color: #6c757d; margin-top: 8px;">
+                  Allowed: Cyrillic, Latin, digits, ( ) . , space - _ +
+              </p>
           </div>
           <div class="modal-footer">
               <button class="modal-button secondary" onclick="hideRenameModal()">Cancel</button>
@@ -149,5 +158,5 @@
 
 {% block tail %}
   {{ super() }}
-  <script src="/static/dag_manager/js/dag_manager.js"></script>
+  <script src="{{ url_for('dag_manager_blueprint.static', filename='js/dag_manager.js') }}"></script>
 {% endblock %}
