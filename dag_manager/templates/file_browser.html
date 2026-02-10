@@ -150,10 +150,11 @@
       </div>
   </div>
   
-  <!-- Передаем данные в JavaScript -->
+  <!-- Передаем данные и права в JavaScript -->
   <script>
     window.DAG_MANAGER_MOUNTS = {{ mounts|tojson }};
     window.DAG_MANAGER_BASE_URL = "{{ url_for('DagManagerView.index') }}".replace('/index', '');
+    window.DAG_MANAGER_PERMISSIONS = {{ permissions|tojson }};
   </script>
 {% endblock %}
 
