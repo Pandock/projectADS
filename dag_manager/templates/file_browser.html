@@ -153,6 +153,7 @@
   <!-- Передаем данные в JavaScript -->
   <script>
     window.DAG_MANAGER_MOUNTS = {{ mounts|tojson }};
+    window.DAG_MANAGER_BASE_URL = "{{ url_for('DagManagerView.index') }}".replace('/index', '');
   </script>
 {% endblock %}
 
