@@ -10,8 +10,12 @@ let itemToDelete = null;
 let currentEditingFile = null;
 let originalFileContent = null;
 let isFileModified = false;
+let baseURL = '';
 
 document.addEventListener('DOMContentLoaded', function() {
+    baseURL = window.DAG_MANAGER_BASE_URL || '/dagmanager';
+    console.log('Base URL: ', baseURL);
+
     availableMounts = window.DAG_MANAGER_MOUNTS || {};
     
     const mountKeys = Object.keys(availableMounts);
@@ -50,7 +54,10 @@ function changeMount() {
 }
 
 function loadTree() {
-    fetch(`/dagmanager/api/tree?mount=${encodeURIComponent(currentMount)}`)
+    const url = `${baseURL}/api/tree?mount=${encodeURIComponent(currentMount)}`;
+    console.log('Loading tree from: ', url)
+
+    fetch(url)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -171,7 +178,10 @@ function expandToCurrentPath() {
 function loadContents(path) {
     document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
     
-    fetch(`/dagmanager/api/contents?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`)
+    const url = `${baseURL}/api/contents?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
+    console.log('Loading contents from: ', url)
+
+    fetch(url)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -317,10 +327,12 @@ function renderContents(folders, files) {
 
 function loadFile(path, filename) {
     document.getElementById('content').innerHTML = '<div class="loading">Loading file...</div>';
+
+    const url = `${baseURL}/api/file?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
+    console.log('Loading file from: ', url)
     
-    console.log('Loading file:', path);
     
-    fetch(`/dagmanager/api/file?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`)
+    fetch(url)
         .then(response => {
             console.log('File response status:', response.status);
             if (!response.ok) {
@@ -429,8 +441,10 @@ function saveFile() {
     // Отключаем кнопку во время сохранения
     saveButton.disabled = true;
     saveButton.textContent = '⏳ Saving...';
+
+    const url = `${baseURL}/api/save_file`;
     
-    fetch('/dagmanager/api/save_file', {
+    fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -548,7 +562,7 @@ function navigateToPath(path) {
 }
 
 function downloadItem(path, name) {
-    const downloadUrl = `/dagmanager/api/download?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
+    const downloadUrl = `${baseURL}/api/download?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
     
     const link = document.createElement('a');
     link.href = downloadUrl;
@@ -649,7 +663,7 @@ function createFile() {
     
     clearInlineError('fileNameError');
     
-    fetch('/dagmanager/api/create_file', {
+    fetch(`${baseURL}/api/create_file`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -690,7 +704,7 @@ function createFolder() {
     
     clearInlineError('folderNameError');
     
-    fetch('/dagmanager/api/create_folder', {
+    fetch(`${baseURL}/api/create_folder`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -734,7 +748,7 @@ function deleteItem() {
     
     hideConfirmDeleteModal();
     
-    fetch('/dagmanager/api/delete', {
+    fetch(`${baseURL}/api/delete`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -777,7 +791,7 @@ function confirmRename() {
     
     clearInlineError('renameError');
     
-    fetch('/dagmanager/api/rename', {
+    fetch(`${baseURL}/api/rename`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
