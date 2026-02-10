@@ -13,6 +13,7 @@ from flask_appbuilder import BaseView, expose, has_access
 from airflow.configuration import conf
 from airflow.www.decorators import action_logging
 from airflow.www.app import csrf
+from flask_login import current_user
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,16 @@ logger = logging.getLogger(__name__)
 # Разрешаем: буквы, цифры, точку, дефис, подчеркивание, пробелы и другие безопасные символы
 SAFE_FILENAME_REGEX = re.compile(r'^[a-zA-Zа-яА-ЯёЁ0-9().,\s\-_+]+$')
 
+# Скрытые файлы и папки (игнорируем)
+HIDDEN_ITEMS = {
+    '.git', '.gitignore', '.svn', '.hg',
+    '__pycache__', '.pytest_cache', '.mypy_cache',
+    '.venv', 'venv', '.env',
+    '.DS_Store', 'Thumbs.db',
+    '.idea', '.vscode',
+    'node_modules',
+    '.pyc', '.pyo', '.pyd'
+}
 
 class DagManagerView(BaseView):
     """File browser view for managing DAG files"""
@@ -33,6 +44,22 @@ class DagManagerView(BaseView):
         self.mounts = self._get_mounts()
         logger.info(f"DAG Manager initialized with mounts: {self.mounts}")
     
+    def _should_skip_item(self, name: str) -> bool:
+        """Check if item should be skipped (hidden/system files)"""
+        # Файлы и папки начинающиеся с точки
+        if name.startswith('.'):
+            return True
+        
+        # Файлы из черного списка
+        if name in HIDDEN_ITEMS:
+            return True
+        
+        # Файлы с расширениями из черного списка
+        if any(name.endswith(ext) for ext in ['.pyc', '.pyo', '.pyd']):
+            return True
+        
+        return False
+
     def _get_mounts(self) -> Dict[str, str]:
         """Get mount points from configuration"""
         mounts = {}
@@ -141,6 +168,10 @@ class DagManagerView(BaseView):
                 return []
             
             for entry in entries:
+                # Пропускаем скрытые файлы
+                if self._should_skip_item(entry):
+                    continue
+                
                 entry_path = os.path.join(full_path, entry)
                 relative_path = os.path.relpath(entry_path, root_path)
                 
@@ -187,6 +218,10 @@ class DagManagerView(BaseView):
                 return [], []
             
             for entry in entries:
+                # Пропускаем скрытые файлы
+                if self._should_skip_item(entry):
+                    continue
+                
                 entry_path = os.path.join(full_path, entry)
                 relative_path = os.path.relpath(entry_path, root_path)
                 
@@ -218,7 +253,7 @@ class DagManagerView(BaseView):
             return [], []
     
     def _read_file(self, mount: str, path: str) -> Optional[str]:
-        """Read file contents"""
+        """Read file contents with multiple encoding attempts"""
         try:
             root_path = self._get_root_path(mount)
             if not root_path:
@@ -243,8 +278,8 @@ class DagManagerView(BaseView):
             if file_size > 5 * 1024 * 1024:
                 return "File too large to display (>5MB)"
             
-            # Пробуем разные кодировки
-            encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1251']
+            # Пробуем разные кодировки (UTF-8 в приоритете)
+            encodings = ['utf-8', 'utf-8-sig', 'cp1251', 'latin-1']
             content = None
             
             for encoding in encodings:
@@ -253,19 +288,19 @@ class DagManagerView(BaseView):
                         content = f.read()
                     logger.info(f"Successfully read file with {encoding}: {full_path}")
                     break
-                except UnicodeDecodeError:
+                except (UnicodeDecodeError, LookupError):
                     continue
                 except Exception as e:
                     logger.error(f"Error reading file with {encoding}: {e}")
                     continue
             
             if content is None:
-                # Последняя попытка - бинарное чтение
+                # Последняя попытка - бинарное чтение с заменой ошибок
                 try:
                     with open(full_path, "rb") as f:
                         binary_content = f.read()
                         content = binary_content.decode('utf-8', errors='replace')
-                    logger.info(f"Read file as binary with error replacement: {full_path}")
+                    logger.warning(f"Read file as binary with error replacement: {full_path}")
                 except Exception as e:
                     logger.error(f"Failed to read file even as binary: {e}")
                     return f"Error reading file: {str(e)}"
@@ -275,7 +310,41 @@ class DagManagerView(BaseView):
         except Exception as e:
             logger.error(f"Error reading file {path}: {e}", exc_info=True)
             return None
-
+    
+    def _get_user_permissions(self) -> Dict[str, bool]:
+        """Get current user's permissions for DAG Manager operations"""
+        permissions = {
+            'can_read': False,
+            'can_edit': False,
+            'can_create': False,
+            'can_delete': False,
+            'can_download': False
+        }
+        
+        try:
+            # Проверяем права доступа к методам
+            if hasattr(current_user, 'perms'):
+                user_perms = current_user.perms if current_user.perms else []
+                
+                # Проверяем конкретные права
+                permissions['can_read'] = any('can_read' in str(p).lower() or 'menu access' in str(p).lower() for p in user_perms)
+                permissions['can_edit'] = any('api_save_file' in str(p) for p in user_perms)
+                permissions['can_create'] = any('api_create' in str(p) for p in user_perms)
+                permissions['can_delete'] = any('api_delete' in str(p) or 'api_rename' in str(p) for p in user_perms)
+                permissions['can_download'] = any('api_download' in str(p) for p in user_perms)
+                
+                # Если есть доступ к плагину вообще, разрешаем чтение
+                if any('DagManagerView' in str(p) or 'dag_manager' in str(p).lower() for p in user_perms):
+                    permissions['can_read'] = True
+                
+                logger.info(f"User permissions: {permissions}")
+        except Exception as e:
+            logger.error(f"Error checking permissions: {e}")
+            # По умолчанию даем только чтение
+            permissions['can_read'] = True
+        
+        return permissions
+    
     
     @expose("/")
     @has_access
@@ -283,10 +352,13 @@ class DagManagerView(BaseView):
     def index(self):
         """Main file browser page"""
         logger.info("Rendering file browser template")
+        permissions = self._get_user_permissions()
         return self.render_template(
             "file_browser.html",
-            mounts=self.mounts
+            mounts=self.mounts,
+            permissions=permissions
         )
+    
     
     @expose("/api/mounts")
     @has_access
@@ -620,5 +692,4 @@ class DagManagerView(BaseView):
         except Exception as e:
             logger.error(f"Error saving file: {e}", exc_info=True)
             return jsonify({"error": str(e), "success": False}), 500
-
 
