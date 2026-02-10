@@ -10,6 +10,8 @@ let itemToDelete = null;
 let currentEditingFile = null;
 let originalFileContent = null;
 let isFileModified = false;
+
+// Base URL для API
 let baseURL = '';
 
 // Права доступа
@@ -68,8 +70,8 @@ function changeMount() {
 
 function loadTree() {
     const url = `${baseURL}/api/tree?mount=${encodeURIComponent(currentMount)}`;
-    console.log('Loading tree from: ', url)
-
+    console.log('Loading tree from:', url);
+    
     fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -186,6 +188,25 @@ function expandToCurrentPath() {
             }
         }
     });
+}
+
+function loadContents(path) {
+    document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
+    
+    const url = `${baseURL}/api/contents?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
+    console.log('Loading contents from:', url);
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderContents(data.folders, data.files);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading contents:', error);
+            document.getElementById('content').innerHTML = '<div class="empty-state">❌ Error loading contents</div>';
+        });
 }
 
 function renderContents(folders, files) {
@@ -333,10 +354,9 @@ function renderContents(folders, files) {
 
 function loadFile(path, filename) {
     document.getElementById('content').innerHTML = '<div class="loading">Loading file...</div>';
-
-    const url = `${baseURL}/api/file?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
-    console.log('Loading file from: ', url)
     
+    const url = `${baseURL}/api/file?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
+    console.log('Loading file from:', url);
     
     fetch(url)
         .then(response => {
@@ -455,7 +475,7 @@ function saveFile() {
     // Отключаем кнопку во время сохранения
     saveButton.disabled = true;
     saveButton.textContent = '⏳ Saving...';
-
+    
     const url = `${baseURL}/api/save_file`;
     
     fetch(url, {
