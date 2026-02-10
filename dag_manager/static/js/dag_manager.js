@@ -12,10 +12,23 @@ let originalFileContent = null;
 let isFileModified = false;
 let baseURL = '';
 
-document.addEventListener('DOMContentLoaded', function() {
-    baseURL = window.DAG_MANAGER_BASE_URL || '/dagmanager';
-    console.log('Base URL: ', baseURL);
+// Права доступа
+let permissions = {
+    can_read: true,
+    can_edit: false,
+    can_create: false,
+    can_delete: false,
+    can_download: false
+};
 
+document.addEventListener('DOMContentLoaded', function() {
+    // Получаем base URL и права из глобальных переменных
+    baseURL = window.DAG_MANAGER_BASE_URL || '/dagmanager';
+    permissions = window.DAG_MANAGER_PERMISSIONS || permissions;
+    
+    console.log('Base URL:', baseURL);
+    console.log('Permissions:', permissions);
+    
     availableMounts = window.DAG_MANAGER_MOUNTS || {};
     
     const mountKeys = Object.keys(availableMounts);
@@ -175,25 +188,6 @@ function expandToCurrentPath() {
     });
 }
 
-function loadContents(path) {
-    document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
-    
-    const url = `${baseURL}/api/contents?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
-    console.log('Loading contents from: ', url)
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                renderContents(data.folders, data.files);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading contents:', error);
-            document.getElementById('content').innerHTML = '<div class="empty-state">❌ Error loading contents</div>';
-        });
-}
-
 function renderContents(folders, files) {
     const content = document.getElementById('content');
     content.innerHTML = '';
@@ -227,40 +221,46 @@ function renderContents(folders, files) {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'item-actions';
         
-        const downloadBtn = document.createElement('button');
-        downloadBtn.className = 'icon-button download';
-        downloadBtn.innerHTML = '⬇️';
-        downloadBtn.title = 'Download as ZIP';
-        downloadBtn.onclick = (e) => {
-            e.stopPropagation();
-            downloadItem(folder.path, folder.name);
-        };
+        // Показываем кнопки только если есть права
+        if (permissions.can_download) {
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'icon-button download';
+            downloadBtn.innerHTML = '⬇️';
+            downloadBtn.title = 'Download as ZIP';
+            downloadBtn.onclick = (e) => {
+                e.stopPropagation();
+                downloadItem(folder.path, folder.name);
+            };
+            actionsDiv.appendChild(downloadBtn);
+        }
         
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'icon-button rename';
-        renameBtn.innerHTML = '✏️';
-        renameBtn.title = 'Rename';
-        renameBtn.onclick = (e) => {
-            e.stopPropagation();
-            showRenameModal(folder.path, folder.name);
-        };
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'icon-button delete';
-        deleteBtn.innerHTML = '🗑️';
-        deleteBtn.title = 'Delete';
-        deleteBtn.onclick = (e) => {
-            e.stopPropagation();
-            confirmDelete(folder.path, folder.name, 'folder');
-        };
-        
-        actionsDiv.appendChild(downloadBtn);
-        actionsDiv.appendChild(renameBtn);
-        actionsDiv.appendChild(deleteBtn);
+        if (permissions.can_delete) {
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'icon-button rename';
+            renameBtn.innerHTML = '✏️';
+            renameBtn.title = 'Rename';
+            renameBtn.onclick = (e) => {
+                e.stopPropagation();
+                showRenameModal(folder.path, folder.name);
+            };
+            actionsDiv.appendChild(renameBtn);
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'icon-button delete';
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.title = 'Delete';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                confirmDelete(folder.path, folder.name, 'folder');
+            };
+            actionsDiv.appendChild(deleteBtn);
+        }
         
         folderDiv.appendChild(mainInfo);
         folderDiv.appendChild(metaDiv);
-        folderDiv.appendChild(actionsDiv);
+        if (actionsDiv.children.length > 0) {
+            folderDiv.appendChild(actionsDiv);
+        }
         
         content.appendChild(folderDiv);
     });
@@ -286,40 +286,46 @@ function renderContents(folders, files) {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'item-actions';
         
-        const downloadBtn = document.createElement('button');
-        downloadBtn.className = 'icon-button download';
-        downloadBtn.innerHTML = '⬇️';
-        downloadBtn.title = 'Download';
-        downloadBtn.onclick = (e) => {
-            e.stopPropagation();
-            downloadItem(file.path, file.name);
-        };
+        // Показываем кнопки только если есть права
+        if (permissions.can_download) {
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'icon-button download';
+            downloadBtn.innerHTML = '⬇️';
+            downloadBtn.title = 'Download';
+            downloadBtn.onclick = (e) => {
+                e.stopPropagation();
+                downloadItem(file.path, file.name);
+            };
+            actionsDiv.appendChild(downloadBtn);
+        }
         
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'icon-button rename';
-        renameBtn.innerHTML = '✏️';
-        renameBtn.title = 'Rename';
-        renameBtn.onclick = (e) => {
-            e.stopPropagation();
-            showRenameModal(file.path, file.name);
-        };
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'icon-button delete';
-        deleteBtn.innerHTML = '🗑️';
-        deleteBtn.title = 'Delete';
-        deleteBtn.onclick = (e) => {
-            e.stopPropagation();
-            confirmDelete(file.path, file.name, 'file');
-        };
-        
-        actionsDiv.appendChild(downloadBtn);
-        actionsDiv.appendChild(renameBtn);
-        actionsDiv.appendChild(deleteBtn);
+        if (permissions.can_delete) {
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'icon-button rename';
+            renameBtn.innerHTML = '✏️';
+            renameBtn.title = 'Rename';
+            renameBtn.onclick = (e) => {
+                e.stopPropagation();
+                showRenameModal(file.path, file.name);
+            };
+            actionsDiv.appendChild(renameBtn);
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'icon-button delete';
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.title = 'Delete';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                confirmDelete(file.path, file.name, 'file');
+            };
+            actionsDiv.appendChild(deleteBtn);
+        }
         
         fileDiv.appendChild(mainInfo);
         fileDiv.appendChild(metaDiv);
-        fileDiv.appendChild(actionsDiv);
+        if (actionsDiv.children.length > 0) {
+            fileDiv.appendChild(actionsDiv);
+        }
         
         content.appendChild(fileDiv);
     });
@@ -369,23 +375,29 @@ function renderFileEditor(filename, content) {
     const chars = content.length;
     const sizeKB = (new Blob([content]).size / 1024).toFixed(2);
     
+    // Проверяем права на редактирование
+    const isReadOnly = !permissions.can_edit;
+    const readOnlyAttr = isReadOnly ? 'readonly' : '';
+    const readOnlyClass = isReadOnly ? 'readonly' : '';
+    const readOnlyNotice = isReadOnly ? '<span style="color: #ffc107;">📖 Read-only mode (no edit permission)</span>' : '';
+    
     // Создаем HTML структуру
     contentArea.innerHTML = `
         <div class="file-editor-container">
             <div class="editor-header">
                 <div class="editor-title">
                     <h4>📄 ${escapeHtml(filename)}</h4>
-                    <span class="editor-status" id="editorStatus"></span>
+                    <span class="editor-status" id="editorStatus">${readOnlyNotice}</span>
                 </div>
             </div>
-            <textarea class="code-editor" id="fileContentEditor" spellcheck="false"></textarea>
+            <textarea class="code-editor ${readOnlyClass}" id="fileContentEditor" spellcheck="false" ${readOnlyAttr}></textarea>
             <div class="editor-footer">
                 <div class="editor-info">
                     <span id="editorStats">Lines: ${lines} | Characters: ${chars} | Size: ${sizeKB} KB</span>
                 </div>
                 <div class="editor-actions">
                     <button class="editor-button cancel" onclick="closeFileEditor()">Close</button>
-                    <button class="editor-button save" id="saveButton" onclick="saveFile()" disabled>💾 Save Changes</button>
+                    ${!isReadOnly ? '<button class="editor-button save" id="saveButton" onclick="saveFile()" disabled>💾 Save Changes</button>' : ''}
                 </div>
             </div>
         </div>
@@ -395,8 +407,10 @@ function renderFileEditor(filename, content) {
     const editor = document.getElementById('fileContentEditor');
     editor.value = content;
     
-    // Добавляем обработчик изменений
-    editor.addEventListener('input', onFileContentChange);
+    // Добавляем обработчик изменений только если можно редактировать
+    if (!isReadOnly) {
+        editor.addEventListener('input', onFileContentChange);
+    }
     
     // Автофокус на редактор
     editor.focus();
@@ -544,14 +558,20 @@ function updateBreadcrumb(path) {
     
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'breadcrumb-actions';
-    actionsContainer.innerHTML = `
-        <button class="action-button" onclick="showCreateFileModal()">📄 Create File</button>
-        <button class="action-button secondary" onclick="showCreateFolderModal()">📁 Create Folder</button>
-    `;
+    
+    // Показываем кнопки создания только если есть права
+    if (permissions.can_create) {
+        actionsContainer.innerHTML = `
+            <button class="action-button" onclick="showCreateFileModal()">📄 Create File</button>
+            <button class="action-button secondary" onclick="showCreateFolderModal()">📁 Create Folder</button>
+        `;
+    }
     
     breadcrumb.innerHTML = '';
     breadcrumb.appendChild(pathContainer);
-    breadcrumb.appendChild(actionsContainer);
+    if (actionsContainer.innerHTML) {
+        breadcrumb.appendChild(actionsContainer);
+    }
 }
 
 function navigateToPath(path) {
