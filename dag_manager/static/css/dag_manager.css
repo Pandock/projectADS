@@ -519,3 +519,14 @@
 .editor-button.cancel:hover {
     background: #5a6268;
 }
+
+.code-editor.readonly {
+    background: #f8f9fa;
+    cursor: not-allowed;
+    opacity: 0.9;
+}
+
+.code-editor.readonly:focus {
+    background: #f8f9fa;
+    border-color: #6c757d;
+}
