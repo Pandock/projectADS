@@ -1,6 +1,6 @@
 {% extends 'airflow/main.html' %}
 
-{% block page_title %}DAG File Manager{% endblock %}
+{% block page_title %}DAG File Browser{% endblock %}
 
 {% block head_css %}
   {{ super() }}
@@ -8,8 +8,8 @@
 {% endblock %}
 
 {% block content %}
-  <h2>DAG File Manager</h2>
-  
+  <h2>DAG File Browser</h2>
+
   {% if mounts|length > 1 %}
   <div class="mount-selector">
       <label for="mountSelect">Mount point:</label>
@@ -20,27 +20,27 @@
       </select>
   </div>
   {% endif %}
-  
+
   <p class="text-muted">Current mount: <code id="currentMount"></code></p>
-  
+
   <!-- Breadcrumb Navigation with action buttons -->
   <div class="breadcrumb-nav" id="breadcrumb">
       <span>Loading...</span>
   </div>
-  
+
   <!-- Main Container -->
   <div class="dag-manager-container">
       <!-- Sidebar with folder tree -->
       <div class="sidebar" id="sidebar">
           <div class="loading">Loading...</div>
       </div>
-      
+
       <!-- Content area -->
       <div class="content-area" id="content">
           <div class="empty-state">📂 Select a folder or file to view its contents</div>
       </div>
   </div>
-  
+
   <!-- Modal для создания файла -->
   <div class="modal-overlay" id="createFileModal">
       <div class="modal-content">
@@ -61,7 +61,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Modal для создания папки -->
   <div class="modal-overlay" id="createFolderModal">
       <div class="modal-content">
@@ -82,7 +82,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Modal для переименования -->
   <div class="modal-overlay" id="renameModal">
       <div class="modal-content">
@@ -103,7 +103,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Modal для подтверждения удаления -->
   <div class="modal-overlay" id="confirmDeleteModal">
       <div class="modal-content">
@@ -119,7 +119,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Modal для ошибок -->
   <div class="modal-overlay" id="errorModal">
       <div class="modal-content">
@@ -134,7 +134,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Modal для успешных операций -->
   <div class="modal-overlay" id="successModal">
       <div class="modal-content">
@@ -149,7 +149,7 @@
           </div>
       </div>
   </div>
-  
+
   <!-- Передаем данные и права в JavaScript -->
   <script>
     window.DAG_MANAGER_MOUNTS = {{ mounts|tojson }};
