@@ -18,13 +18,13 @@ dag_manager_bp = Blueprint(
 class DagManagerPlugin(AirflowPlugin):
     """Plugin for managing DAG files through web interface"""
     name = "dag_manager"
-    
+
     # Регистрируем blueprint для статики
     flask_blueprints = [dag_manager_bp]
-    
+
     appbuilder_views = [
         {
-            "name": "Dag Manager",
+            "name": "DAG manage",  # ИСПРАВЛЕНИЕ: Изменено название в меню
             "category": "Admin",
             "view": DagManagerView()
         }
