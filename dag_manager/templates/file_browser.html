@@ -1,6 +1,6 @@
 {% extends 'airflow/main.html' %}
 
-{% block page_title %}DAG File Browser{% endblock %}
+{% block page_title %}DAG file manage{% endblock %}
 
 {% block head_css %}
   {{ super() }}
@@ -162,4 +162,5 @@
   {{ super() }}
   <script src="{{ url_for('dag_manager_blueprint.static', filename='js/dag_manager.js') }}"></script>
 {% endblock %}
+
 
