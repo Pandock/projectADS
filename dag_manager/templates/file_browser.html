@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-  <h2>DAG File Browser</h2>
+  <h2>DAG file manage</h2>
 
   {% if mounts|length > 1 %}
   <div class="mount-selector">
@@ -162,3 +162,4 @@
   {{ super() }}
   <script src="{{ url_for('dag_manager_blueprint.static', filename='js/dag_manager.js') }}"></script>
 {% endblock %}
+
