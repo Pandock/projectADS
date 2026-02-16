@@ -1,98 +1,128 @@
-// DAG Manager JavaScript
-
-let currentMount = '';
+let currentMount;
 let currentPath = '';
 let availableMounts = {};
-let itemToRename = null;
-let itemToDelete = null;
+let permissions = {
+    can_read: true,
+    can_edit: false,
+    can_create_file: false,
+    can_create_folder: false,
+    can_delete: false,
+    can_rename: false,
+    can_download: false
+};
 
-// Переменные для редактора
 let currentEditingFile = null;
 let originalFileContent = null;
 let isFileModified = false;
 
-// Base URL для API
-let baseURL = '';
+let itemToRename = null;
+let itemToDelete = null;
 
-// ИСПРАВЛЕНИЕ: Обновленные права доступа с разделением
-let permissions = {
-    can_read: true,
-    can_edit: false,
-    can_create_file: false,      // РАЗДЕЛЕНО
-    can_create_folder: false,    // РАЗДЕЛЕНО
-    can_delete: false,            // ТОЛЬКО УДАЛЕНИЕ
-    can_rename: false,            // ТОЛЬКО ПЕРЕИМЕНОВАНИЕ
-    can_download: false
-};
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Получаем base URL и права из глобальных переменных
-    baseURL = window.DAG_MANAGER_BASE_URL || '/dagmanager';
-    permissions = window.DAG_MANAGER_PERMISSIONS || permissions;
+    console.log('DAG Manager initializing...');
 
-    console.log('Base URL:', baseURL);
+    if (typeof initializeCSRFToken === 'function') {
+        initializeCSRFToken();
+    } else {
+        console.error('initializeCSRFToken is not defined! Check csrf.js loading.');
+    }
+
+    const baseURL = window.DAG_MANAGER_BASE_URL || '/dagmanager';
+    if (typeof initializeAPIClient === 'function') {
+        initializeAPIClient(baseURL);
+    } else {
+        console.error('initializeAPIClient is not defined! Check api_client.js loading.');
+    }
+
+    permissions = window.DAG_MANAGER_PERMISSIONS || permissions;
     console.log('Permissions:', permissions);
 
     availableMounts = window.DAG_MANAGER_MOUNTS || {};
-
     const mountKeys = Object.keys(availableMounts);
+
     if (mountKeys.length === 0) {
         console.error('No mounts available');
-        document.getElementById('currentMount').textContent = 'No mounts configured';
+        const mountEl = document.getElementById('currentMount');
+        if (mountEl) {
+            mountEl.textContent = 'No mounts configured';
+        }
         return;
     }
 
     currentMount = mountKeys[0];
-    document.getElementById('currentMount').textContent = currentMount + ' (' + availableMounts[currentMount] + ')';
+    const mountEl = document.getElementById('currentMount');
+    if (mountEl) {
+        mountEl.textContent = `${currentMount}: ${availableMounts[currentMount]}`;
+    }
 
-    if (document.getElementById('mountSelect')) {
-        document.getElementById('mountSelect').value = currentMount;
+    const mountSelect = document.getElementById('mountSelect');
+    if (mountSelect) {
+        mountSelect.value = currentMount;
     }
 
     loadTree();
-    loadContents('');
-    updateBreadcrumb('');
+    loadContents();
+    updateBreadcrumb();
+
+    console.log('DAG Manager initialized successfully');
 });
+
 
 function goHome() {
     currentPath = '';
     loadTree();
-    loadContents('');
-    updateBreadcrumb('');
+    loadContents();
+    updateBreadcrumb();
 }
 
 function changeMount() {
-    currentMount = document.getElementById('mountSelect').value;
-    document.getElementById('currentMount').textContent = currentMount + ' (' + availableMounts[currentMount] + ')';
+    const mountSelect = document.getElementById('mountSelect');
+    if (!mountSelect) return;
+
+    currentMount = mountSelect.value;
+    const mountEl = document.getElementById('currentMount');
+    if (mountEl) {
+        mountEl.textContent = `${currentMount}: ${availableMounts[currentMount]}`;
+    }
+
     currentPath = '';
     loadTree();
-    loadContents('');
-    updateBreadcrumb('');
+    loadContents();
+    updateBreadcrumb();
 }
 
-function loadTree() {
-    const url = `${baseURL}/api/tree?mount=${encodeURIComponent(currentMount)}`;
-    console.log('Loading tree from:', url);
+function navigateToPath(path) {
+    currentPath = path;
+    loadContents(path);
+    updateBreadcrumb(path);
+    expandToCurrentPath();
+}
 
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                renderTree(data.tree);
-                expandToCurrentPath();
-            }
-        })
-        .catch(error => {
-            console.error('Error loading tree:', error);
-            document.getElementById('sidebar').innerHTML = '<div class="loading">Error loading tree</div>';
-        });
+
+async function loadTree() {
+    try {
+        const data = await getTree(currentMount);
+        if (data.success) {
+            renderTree(data.tree);
+            expandToCurrentPath();
+        }
+    } catch (error) {
+        console.error('Error loading tree:', error);
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.innerHTML = '<div class="loading-error">❌ Error loading tree</div>';
+        }
+    }
 }
 
 function renderTree(items, container, level = 0) {
     if (!container) {
         container = document.getElementById('sidebar');
-        container.innerHTML = '';
     }
+    if (!container) return;
+
+    container.innerHTML = '';
 
     items.forEach(item => {
         const itemDiv = document.createElement('div');
@@ -101,13 +131,14 @@ function renderTree(items, container, level = 0) {
 
         const headerDiv = document.createElement('div');
         headerDiv.className = 'tree-item-header';
+
         if (item.path === currentPath) {
             headerDiv.classList.add('active');
         }
 
         const toggle = document.createElement('span');
         toggle.className = 'tree-toggle';
-        toggle.textContent = item.children && item.children.length > 0 ? '▶' : ' ';
+        toggle.textContent = (item.children && item.children.length > 0) ? '▶' : '';
 
         const icon = document.createElement('span');
         icon.className = 'tree-icon';
@@ -123,9 +154,7 @@ function renderTree(items, container, level = 0) {
 
         headerDiv.onclick = (e) => {
             e.stopPropagation();
-            currentPath = item.path;
-            loadContents(item.path);
-            updateBreadcrumb(item.path);
+            navigateToPath(item.path);
             document.querySelectorAll('.tree-item-header').forEach(el => el.classList.remove('active'));
             headerDiv.classList.add('active');
         };
@@ -171,6 +200,7 @@ function expandToCurrentPath() {
 
     parts.forEach((part, index) => {
         accumulated += (index > 0 ? '/' : '') + part;
+
         const treeItem = document.querySelector(`.tree-item[data-path="${accumulated}"]`);
         if (treeItem) {
             const childrenDiv = treeItem.querySelector('.tree-children');
@@ -192,27 +222,28 @@ function expandToCurrentPath() {
     });
 }
 
-function loadContents(path) {
-    document.getElementById('content').innerHTML = '<div class="loading">Loading...</div>';
 
-    const url = `${baseURL}/api/contents?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
-    console.log('Loading contents from:', url);
+async function loadContents(path) {
+    const content = document.getElementById('content');
+    if (!content) return;
 
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                renderContents(data.folders, data.files);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading contents:', error);
-            document.getElementById('content').innerHTML = '<div class="empty-state">❌ Error loading contents</div>';
-        });
+    content.innerHTML = '<div class="loading">⏳ Loading...</div>';
+
+    try {
+        const data = await getContents(currentMount, path);
+        if (data.success) {
+            renderContents(data.folders, data.files);
+        }
+    } catch (error) {
+        console.error('Error loading contents:', error);
+        content.innerHTML = '<div class="empty-state">❌ Error loading content</div>';
+    }
 }
 
 function renderContents(folders, files) {
     const content = document.getElementById('content');
+    if (!content) return;
+
     content.innerHTML = '';
 
     if (folders.length === 0 && files.length === 0) {
@@ -224,64 +255,22 @@ function renderContents(folders, files) {
         const folderDiv = document.createElement('div');
         folderDiv.className = 'folder-list-item';
 
+        folderDiv.onclick = (e) => {
+            if (e.target.closest('.item-actions')) {
+                return;
+            }
+            navigateToPath(folder.path);
+        };
+
         const mainInfo = document.createElement('div');
         mainInfo.className = 'file-info-main';
-        mainInfo.innerHTML = `
-            <span class="folder-icon-large">📁</span>
-            <strong>${escapeHtml(folder.name)}</strong>
-        `;
-        mainInfo.onclick = () => {
-            currentPath = folder.path;
-            loadContents(folder.path);
-            updateBreadcrumb(folder.path);
-            expandToCurrentPath();
-        };
+        mainInfo.innerHTML = `<span class="folder-icon-large">📁</span> <strong>${escapeHtml(folder.name)}</strong>`;
 
         const metaDiv = document.createElement('div');
         metaDiv.className = 'file-meta';
         metaDiv.textContent = `Files: ${folder.item_count || 0}`;
 
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'item-actions';
-
-        // ИСПРАВЛЕНИЕ: Показываем кнопки только если есть соответствующие права
-        if (permissions.can_download) {
-            const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'icon-button download';
-            downloadBtn.innerHTML = '⬇️';
-            downloadBtn.title = 'Download as ZIP';
-            downloadBtn.onclick = (e) => {
-                e.stopPropagation();
-                downloadItem(folder.path, folder.name);
-            };
-            actionsDiv.appendChild(downloadBtn);
-        }
-
-        // ИСПРАВЛЕНИЕ БАГА 1: Проверяем can_rename отдельно
-        if (permissions.can_rename) {
-            const renameBtn = document.createElement('button');
-            renameBtn.className = 'icon-button rename';
-            renameBtn.innerHTML = '✏️';
-            renameBtn.title = 'Rename';
-            renameBtn.onclick = (e) => {
-                e.stopPropagation();
-                showRenameModal(folder.path, folder.name);
-            };
-            actionsDiv.appendChild(renameBtn);
-        }
-
-        // ИСПРАВЛЕНИЕ БАГА 1: Проверяем can_delete отдельно
-        if (permissions.can_delete) {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'icon-button delete';
-            deleteBtn.innerHTML = '🗑️';
-            deleteBtn.title = 'Delete';
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                confirmDelete(folder.path, folder.name, 'folder');
-            };
-            actionsDiv.appendChild(deleteBtn);
-        }
+        const actionsDiv = createItemActions(folder.path, folder.name, 'folder');
 
         folderDiv.appendChild(mainInfo);
         folderDiv.appendChild(metaDiv);
@@ -296,61 +285,24 @@ function renderContents(folders, files) {
         const fileDiv = document.createElement('div');
         fileDiv.className = 'file-list-item';
 
+        fileDiv.onclick = (e) => {
+            if (e.target.closest('.item-actions')) {
+                return;
+            }
+            loadFile(file.path, file.name);
+        };
+
         const sizeKB = (file.size / 1024).toFixed(2);
 
         const mainInfo = document.createElement('div');
         mainInfo.className = 'file-info-main';
-        mainInfo.innerHTML = `
-            <span class="file-icon">📄</span>
-            <span>${escapeHtml(file.name)}</span>
-        `;
-        mainInfo.onclick = () => loadFile(file.path, file.name);
+        mainInfo.innerHTML = `<span class="file-icon">📄</span> <span>${escapeHtml(file.name)}</span>`;
 
         const metaDiv = document.createElement('div');
         metaDiv.className = 'file-meta';
         metaDiv.textContent = `${sizeKB} KB`;
 
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'item-actions';
-
-        // ИСПРАВЛЕНИЕ: Показываем кнопки только если есть соответствующие права
-        if (permissions.can_download) {
-            const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'icon-button download';
-            downloadBtn.innerHTML = '⬇️';
-            downloadBtn.title = 'Download';
-            downloadBtn.onclick = (e) => {
-                e.stopPropagation();
-                downloadItem(file.path, file.name);
-            };
-            actionsDiv.appendChild(downloadBtn);
-        }
-
-        // ИСПРАВЛЕНИЕ БАГА 1: Проверяем can_rename отдельно
-        if (permissions.can_rename) {
-            const renameBtn = document.createElement('button');
-            renameBtn.className = 'icon-button rename';
-            renameBtn.innerHTML = '✏️';
-            renameBtn.title = 'Rename';
-            renameBtn.onclick = (e) => {
-                e.stopPropagation();
-                showRenameModal(file.path, file.name);
-            };
-            actionsDiv.appendChild(renameBtn);
-        }
-
-        // ИСПРАВЛЕНИЕ БАГА 1: Проверяем can_delete отдельно
-        if (permissions.can_delete) {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'icon-button delete';
-            deleteBtn.innerHTML = '🗑️';
-            deleteBtn.title = 'Delete';
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                confirmDelete(file.path, file.name, 'file');
-            };
-            actionsDiv.appendChild(deleteBtn);
-        }
+        const actionsDiv = createItemActions(file.path, file.name, 'file');
 
         fileDiv.appendChild(mainInfo);
         fileDiv.appendChild(metaDiv);
@@ -362,8 +314,52 @@ function renderContents(folders, files) {
     });
 }
 
+function createItemActions(path, name, type) {
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'item-actions';
+
+    if (permissions.can_download) {
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'icon-button download';
+        downloadBtn.innerHTML = '⬇️';
+        downloadBtn.title = type === 'folder' ? 'Download as ZIP' : 'Download';
+        downloadBtn.onclick = (e) => {
+            e.stopPropagation();
+            downloadItem(path, name);
+        };
+        actionsDiv.appendChild(downloadBtn);
+    }
+
+    if (permissions.can_rename) {
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'icon-button rename';
+        renameBtn.innerHTML = '✏️';
+        renameBtn.title = 'Rename';
+        renameBtn.onclick = (e) => {
+            e.stopPropagation();
+            showRenameModal(path, name);
+        };
+        actionsDiv.appendChild(renameBtn);
+    }
+
+    if (permissions.can_delete) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'icon-button delete';
+        deleteBtn.innerHTML = '🗑️';
+        deleteBtn.title = 'Delete';
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            confirmDeleteAction(path, name, type);
+        };
+        actionsDiv.appendChild(deleteBtn);
+    }
+
+    return actionsDiv;
+}
+
 function updateBreadcrumb(path) {
     const breadcrumb = document.getElementById('breadcrumb');
+    if (!breadcrumb) return;
 
     const pathDiv = document.createElement('div');
     pathDiv.className = 'breadcrumb-path';
@@ -381,7 +377,7 @@ function updateBreadcrumb(path) {
 
         parts.forEach((part, index) => {
             const separator = document.createElement('span');
-            separator.textContent = ' / ';
+            separator.textContent = '/';
             pathDiv.appendChild(separator);
 
             accumulated += (index > 0 ? '/' : '') + part;
@@ -409,11 +405,10 @@ function updateBreadcrumb(path) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'breadcrumb-actions';
 
-    // ИСПРАВЛЕНИЕ БАГА 2: Отдельные кнопки для файлов и папок
     if (permissions.can_create_file) {
         const createFileBtn = document.createElement('button');
         createFileBtn.className = 'action-button';
-        createFileBtn.innerHTML = '➕ New File';
+        createFileBtn.innerHTML = '📄 New File';
         createFileBtn.onclick = showCreateFileModal;
         actionsDiv.appendChild(createFileBtn);
     }
@@ -421,7 +416,7 @@ function updateBreadcrumb(path) {
     if (permissions.can_create_folder) {
         const createFolderBtn = document.createElement('button');
         createFolderBtn.className = 'action-button';
-        createFolderBtn.innerHTML = '➕ New Folder';
+        createFolderBtn.innerHTML = '📁 New Folder';
         createFolderBtn.onclick = showCreateFolderModal;
         actionsDiv.appendChild(createFolderBtn);
     }
@@ -433,16 +428,8 @@ function updateBreadcrumb(path) {
     }
 }
 
-function navigateToPath(path) {
-    currentPath = path;
-    loadContents(path);
-    updateBreadcrumb(path);
-    expandToCurrentPath();
-}
-
 function downloadItem(path, name) {
-    const downloadUrl = `${baseURL}/api/download?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
-
+    const downloadUrl = getDownloadURL(currentMount, path);
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = name;
@@ -451,295 +438,41 @@ function downloadItem(path, name) {
     document.body.removeChild(link);
 }
 
-// Modal functions
-function showCreateFileModal() {
-    // ИСПРАВЛЕНИЕ: Проверяем права перед показом модального окна
-    if (!permissions.can_create_file) {
-        showError('У вас нет прав для создания файлов');
-        return;
-    }
-    clearInlineError('fileNameError');
-    document.getElementById('createFileModal').classList.add('active');
-    document.getElementById('fileNameInput').value = '';
-    document.getElementById('fileNameInput').focus();
-}
 
-function hideCreateFileModal() {
-    document.getElementById('createFileModal').classList.remove('active');
-    clearInlineError('fileNameError');
-}
+async function loadFile(path, name) {
+    const content = document.getElementById('content');
+    if (!content) return;
 
-function showCreateFolderModal() {
-    // ИСПРАВЛЕНИЕ: Проверяем права перед показом модального окна
-    if (!permissions.can_create_folder) {
-        showError('У вас нет прав для создания папок');
-        return;
-    }
-    clearInlineError('folderNameError');
-    document.getElementById('createFolderModal').classList.add('active');
-    document.getElementById('folderNameInput').value = '';
-    document.getElementById('folderNameInput').focus();
-}
+    content.innerHTML = '<div class="loading">⏳ Loading file...</div>';
 
-function hideCreateFolderModal() {
-    document.getElementById('createFolderModal').classList.remove('active');
-    clearInlineError('folderNameError');
-}
-
-function showRenameModal(path, currentName) {
-    // ИСПРАВЛЕНИЕ: Проверяем права
-    if (!permissions.can_rename) {
-        showError('У вас нет прав для переименования');
-        return;
-    }
-    itemToRename = path;
-    clearInlineError('renameError');
-    document.getElementById('renameModal').classList.add('active');
-    document.getElementById('renameInput').value = currentName;
-    document.getElementById('renameInput').focus();
-}
-
-function hideRenameModal() {
-    document.getElementById('renameModal').classList.remove('active');
-    clearInlineError('renameError');
-    itemToRename = null;
-}
-
-function confirmDelete(path, name, type) {
-    // ИСПРАВЛЕНИЕ: Проверяем права
-    if (!permissions.can_delete) {
-        showError('У вас нет прав для удаления');
-        return;
-    }
-    itemToDelete = {path, name, type};
-    document.getElementById('deleteMessage').textContent = `Are you sure you want to delete this ${type}: "${name}"?`;
-    document.getElementById('confirmDeleteModal').classList.add('active');
-}
-
-function hideConfirmDeleteModal() {
-    document.getElementById('confirmDeleteModal').classList.remove('active');
-    itemToDelete = null;
-}
-
-function showError(message) {
-    document.getElementById('errorMessage').textContent = message;
-    document.getElementById('errorModal').classList.add('active');
-}
-
-function hideErrorModal() {
-    document.getElementById('errorModal').classList.remove('active');
-}
-
-function showSuccess(message) {
-    document.getElementById('successMessage').textContent = message;
-    document.getElementById('successModal').classList.add('active');
-}
-
-function hideSuccessModal() {
-    document.getElementById('successModal').classList.remove('active');
-}
-
-function showInlineError(errorElementId, message) {
-    const errorElement = document.getElementById(errorElementId);
-    errorElement.textContent = message;
-    errorElement.classList.add('visible');
-}
-
-function clearInlineError(errorElementId) {
-    const errorElement = document.getElementById(errorElementId);
-    errorElement.textContent = '';
-    errorElement.classList.remove('visible');
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Функции для создания файла и папки
-function createFile() {
-    const fileName = document.getElementById('fileNameInput').value.trim();
-
-    if (!fileName) {
-        showInlineError('fileNameError', 'Имя файла не может быть пустым');
-        return;
-    }
-
-    const data = {
-        mount: currentMount,
-        path: currentPath,
-        name: fileName
-    };
-
-    fetch(`${baseURL}/api/create_file`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const data = await getFile(currentMount, path);
         if (data.success) {
-            hideCreateFileModal();
-            showSuccess('Файл успешно создан');
-            loadContents(currentPath);
-            loadTree();
+            renderFileEditor(path, name, data.content);
         } else {
-            showInlineError('fileNameError', data.error || 'Ошибка при создании файла');
+            content.innerHTML = `<div class="empty-state">❌ Error loading file: ${data.error}</div>`;
         }
-    })
-    .catch(error => {
-        console.error('Error creating file:', error);
-        showInlineError('fileNameError', 'Ошибка при создании файла');
-    });
-}
-
-function createFolder() {
-    const folderName = document.getElementById('folderNameInput').value.trim();
-
-    if (!folderName) {
-        showInlineError('folderNameError', 'Имя папки не может быть пустым');
-        return;
+    } catch (error) {
+        console.error('Error loading file:', error);
+        content.innerHTML = '<div class="empty-state">❌ Error loading file</div>';
     }
-
-    const data = {
-        mount: currentMount,
-        path: currentPath,
-        name: folderName
-    };
-
-    fetch(`${baseURL}/api/create_folder`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            hideCreateFolderModal();
-            showSuccess('Папка успешно создана');
-            loadContents(currentPath);
-            loadTree();
-        } else {
-            showInlineError('folderNameError', data.error || 'Ошибка при создании папки');
-        }
-    })
-    .catch(error => {
-        console.error('Error creating folder:', error);
-        showInlineError('folderNameError', 'Ошибка при создании папки');
-    });
-}
-
-function confirmRename() {
-    const newName = document.getElementById('renameInput').value.trim();
-
-    if (!newName) {
-        showInlineError('renameError', 'Имя не может быть пустым');
-        return;
-    }
-
-    const data = {
-        mount: currentMount,
-        path: itemToRename,
-        new_name: newName
-    };
-
-    fetch(`${baseURL}/api/rename`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            hideRenameModal();
-            showSuccess('Элемент успешно переименован');
-            loadContents(currentPath);
-            loadTree();
-        } else {
-            showInlineError('renameError', data.error || 'Ошибка при переименовании');
-        }
-    })
-    .catch(error => {
-        console.error('Error renaming item:', error);
-        showInlineError('renameError', 'Ошибка при переименовании');
-    });
-}
-
-function deleteItem() {
-    if (!itemToDelete) return;
-
-    const data = {
-        mount: currentMount,
-        path: itemToDelete.path
-    };
-
-    fetch(`${baseURL}/api/delete`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            hideConfirmDeleteModal();
-            showSuccess('Элемент успешно удален');
-            loadContents(currentPath);
-            loadTree();
-        } else {
-            hideConfirmDeleteModal();
-            showError(data.error || 'Ошибка при удалении');
-        }
-    })
-    .catch(error => {
-        console.error('Error deleting item:', error);
-        hideConfirmDeleteModal();
-        showError('Ошибка при удалении');
-    });
-}
-
-function loadFile(path, name) {
-    document.getElementById('content').innerHTML = '<div class="loading">Loading file...</div>';
-
-    const url = `${baseURL}/api/file?mount=${encodeURIComponent(currentMount)}&path=${encodeURIComponent(path)}`;
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                renderFileEditor(path, name, data.content);
-            } else {
-                document.getElementById('content').innerHTML = `<div class="empty-state">❌ Error loading file: ${data.error}</div>`;
-            }
-        })
-        .catch(error => {
-            console.error('Error loading file:', error);
-            document.getElementById('content').innerHTML = '<div class="empty-state">❌ Error loading file</div>';
-        });
 }
 
 function renderFileEditor(path, name, content) {
     const contentDiv = document.getElementById('content');
+    if (!contentDiv) return;
+
     contentDiv.innerHTML = '';
 
     const container = document.createElement('div');
     container.className = 'file-editor-container';
 
-    // Header
     const header = document.createElement('div');
     header.className = 'editor-header';
 
     const titleDiv = document.createElement('div');
     titleDiv.className = 'editor-title';
-    titleDiv.innerHTML = `<h4>📄 ${escapeHtml(name)}</h4>`;
+    titleDiv.innerHTML = `<h4>📝 ${escapeHtml(name)}</h4>`;
 
     const statusDiv = document.createElement('div');
     statusDiv.className = 'editor-status';
@@ -767,16 +500,23 @@ function renderFileEditor(path, name, content) {
     editor.oninput = () => {
         isFileModified = editor.value !== originalFileContent;
         const status = document.getElementById('editorStatus');
+        const saveButton = document.getElementById('saveBtn');
+
         if (isFileModified) {
-            status.textContent = 'Modified';
-            status.classList.add('modified');
+            if (status) {
+                status.textContent = 'Modified';
+                status.classList.add('modified');
+            }
+            if (saveButton) saveButton.disabled = false;
         } else {
-            status.textContent = 'Ready';
-            status.classList.remove('modified');
+            if (status) {
+                status.textContent = 'Ready';
+                status.classList.remove('modified');
+            }
+            if (saveButton) saveButton.disabled = true;
         }
     };
 
-    // Footer
     const footer = document.createElement('div');
     footer.className = 'editor-footer';
 
@@ -793,32 +533,16 @@ function renderFileEditor(path, name, content) {
         saveBtn.textContent = '💾 Save';
         saveBtn.id = 'saveBtn';
         saveBtn.disabled = true;
-        saveBtn.onclick = saveFile;
+        saveBtn.onclick = handleSaveFile;
         actions.appendChild(saveBtn);
-
-        editor.oninput = () => {
-            isFileModified = editor.value !== originalFileContent;
-            const status = document.getElementById('editorStatus');
-            const saveButton = document.getElementById('saveBtn');
-
-            if (isFileModified) {
-                status.textContent = 'Modified';
-                status.classList.add('modified');
-                saveButton.disabled = false;
-            } else {
-                status.textContent = 'Ready';
-                status.classList.remove('modified');
-                saveButton.disabled = true;
-            }
-        };
     }
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'editor-button cancel';
-    cancelBtn.textContent = '← Back';
+    cancelBtn.textContent = '◀ Back';
     cancelBtn.onclick = () => {
         if (isFileModified && permissions.can_edit) {
-            if (confirm('У вас есть несохраненные изменения. Закрыть редактор?')) {
+            if (confirm('У вас есть несохраненные изменения. Вы уверены, что хотите выйти?')) {
                 loadContents(currentPath);
             }
         } else {
@@ -837,53 +561,284 @@ function renderFileEditor(path, name, content) {
     contentDiv.appendChild(container);
 }
 
-function saveFile() {
+async function handleSaveFile() {
     if (!permissions.can_edit) {
         showError('У вас нет прав для редактирования файлов');
         return;
     }
 
     const editor = document.getElementById('codeEditor');
+    if (!editor) return;
+
     const content = editor.value;
 
-    const data = {
-        mount: currentMount,
-        path: currentEditingFile,
-        content: content
-    };
+    try {
+        const data = await apiSaveFile(currentMount, currentEditingFile, content);
 
-    fetch(`${baseURL}/api/save_file`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
         if (data.success) {
-            showSuccess('Файл успешно сохранен');
+            showSuccess('Файл сохранен успешно');
             originalFileContent = content;
             isFileModified = false;
 
             const status = document.getElementById('editorStatus');
-            status.textContent = 'Saved';
-            status.classList.remove('modified');
-
-            const saveBtn = document.getElementById('saveBtn');
-            if (saveBtn) {
-                saveBtn.disabled = true;
+            if (status) {
+                status.textContent = 'Saved ✓';
+                status.classList.remove('modified');
             }
 
+            const saveBtn = document.getElementById('saveBtn');
+            if (saveBtn) saveBtn.disabled = true;
+
             setTimeout(() => {
-                status.textContent = 'Ready';
+                if (status) {
+                    status.textContent = 'Ready';
+                }
             }, 2000);
         } else {
             showError(data.error || 'Ошибка при сохранении файла');
         }
-    })
-    .catch(error => {
+    } catch (error) {
         console.error('Error saving file:', error);
         showError('Ошибка при сохранении файла');
-    });
+    }
+}
+
+
+function showCreateFileModal() {
+    if (!permissions.can_create_file) {
+        showError('У вас нет прав для создания файлов');
+        return;
+    }
+
+    clearInlineError('fileNameError');
+    const modal = document.getElementById('createFileModal');
+    const input = document.getElementById('fileNameInput');
+    if (modal) modal.classList.add('active');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function hideCreateFileModal() {
+    const modal = document.getElementById('createFileModal');
+    if (modal) modal.classList.remove('active');
+    clearInlineError('fileNameError');
+}
+
+function showCreateFolderModal() {
+    if (!permissions.can_create_folder) {
+        showError('У вас нет прав для создания папок');
+        return;
+    }
+
+    clearInlineError('folderNameError');
+    const modal = document.getElementById('createFolderModal');
+    const input = document.getElementById('folderNameInput');
+    if (modal) modal.classList.add('active');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function hideCreateFolderModal() {
+    const modal = document.getElementById('createFolderModal');
+    if (modal) modal.classList.remove('active');
+    clearInlineError('folderNameError');
+}
+
+function showRenameModal(path, currentName) {
+    if (!permissions.can_rename) {
+        showError('У вас нет прав для переименования');
+        return;
+    }
+
+    itemToRename = path;
+    clearInlineError('renameError');
+
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    if (modal) modal.classList.add('active');
+    if (input) {
+        input.value = currentName;
+        input.focus();
+    }
+}
+
+function hideRenameModal() {
+    const modal = document.getElementById('renameModal');
+    if (modal) modal.classList.remove('active');
+    clearInlineError('renameError');
+    itemToRename = null;
+}
+
+function confirmDeleteAction(path, name, type) {
+    if (!permissions.can_delete) {
+        showError('У вас нет прав для удаления');
+        return;
+    }
+
+    itemToDelete = { path, name, type };
+
+    const message = document.getElementById('deleteMessage');
+    const modal = document.getElementById('confirmDeleteModal');
+
+    if (message) {
+        message.textContent = `Are you sure you want to delete this ${type}: "${name}"?`;
+    }
+    if (modal) modal.classList.add('active');
+}
+
+function hideConfirmDeleteModal() {
+    const modal = document.getElementById('confirmDeleteModal');
+    if (modal) modal.classList.remove('active');
+    itemToDelete = null;
+}
+
+function showError(message) {
+    const messageEl = document.getElementById('errorMessage');
+    const modal = document.getElementById('errorModal');
+    if (messageEl) messageEl.textContent = message;
+    if (modal) modal.classList.add('active');
+}
+
+function hideErrorModal() {
+    const modal = document.getElementById('errorModal');
+    if (modal) modal.classList.remove('active');
+}
+
+function showSuccess(message) {
+    const messageEl = document.getElementById('successMessage');
+    const modal = document.getElementById('successModal');
+    if (messageEl) messageEl.textContent = message;
+    if (modal) modal.classList.add('active');
+}
+
+function hideSuccessModal() {
+    const modal = document.getElementById('successModal');
+    if (modal) modal.classList.remove('active');
+}
+
+function showInlineError(errorElementId, message) {
+    const errorElement = document.getElementById(errorElementId);
+    if (errorElement) {
+        errorElement.textContent = message;
+        errorElement.classList.add('visible');
+    }
+}
+
+function clearInlineError(errorElementId) {
+    const errorElement = document.getElementById(errorElementId);
+    if (errorElement) {
+        errorElement.textContent = '';
+        errorElement.classList.remove('visible');
+    }
+}
+
+
+async function createFile() {
+    const input = document.getElementById('fileNameInput');
+    if (!input) return;
+
+    const fileName = input.value.trim();
+    if (!fileName) {
+        showInlineError('fileNameError', 'Введите имя файла');
+        return;
+    }
+
+    try {
+        const data = await apiCreateFile(currentMount, currentPath, fileName);
+        if (data.success) {
+            hideCreateFileModal();
+            showSuccess('Файл создан успешно');
+            loadContents(currentPath);
+            loadTree();
+        } else {
+            showInlineError('fileNameError', data.error || 'Ошибка при создании файла');
+        }
+    } catch (error) {
+        console.error('Error creating file:', error);
+        showInlineError('fileNameError', 'Ошибка при создании файла');
+    }
+}
+
+async function createFolder() {
+    const input = document.getElementById('folderNameInput');
+    if (!input) return;
+
+    const folderName = input.value.trim();
+    if (!folderName) {
+        showInlineError('folderNameError', 'Введите имя папки');
+        return;
+    }
+
+    try {
+        const data = await apiCreateFolder(currentMount, currentPath, folderName);
+        if (data.success) {
+            hideCreateFolderModal();
+            showSuccess('Папка создана успешно');
+            loadContents(currentPath);
+            loadTree();
+        } else {
+            showInlineError('folderNameError', data.error || 'Ошибка при создании папки');
+        }
+    } catch (error) {
+        console.error('Error creating folder:', error);
+        showInlineError('folderNameError', 'Ошибка при создании папки');
+    }
+}
+
+async function confirmRename() {
+    const input = document.getElementById('renameInput');
+    if (!input) return;
+
+    const newName = input.value.trim();
+    if (!newName) {
+        showInlineError('renameError', 'Введите новое имя');
+        return;
+    }
+
+    try {
+        const data = await apiRenameItem(currentMount, itemToRename, newName);
+        if (data.success) {
+            hideRenameModal();
+            showSuccess('Элемент переименован успешно');
+            loadContents(currentPath);
+            loadTree();
+        } else {
+            showInlineError('renameError', data.error || 'Ошибка при переименовании');
+        }
+    } catch (error) {
+        console.error('Error renaming item:', error);
+        showInlineError('renameError', 'Ошибка при переименовании');
+    }
+}
+
+async function deleteItem() {
+    if (!itemToDelete) return;
+
+    try {
+        const data = await apiDeleteItem(currentMount, itemToDelete.path);
+        if (data.success) {
+            hideConfirmDeleteModal();
+            showSuccess('Элемент удален успешно');
+            loadContents(currentPath);
+            loadTree();
+        } else {
+            hideConfirmDeleteModal();
+            showError(data.error || 'Ошибка при удалении');
+        }
+    } catch (error) {
+        console.error('Error deleting item:', error);
+        hideConfirmDeleteModal();
+        showError('Ошибка при удалении');
+    }
+}
+
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
