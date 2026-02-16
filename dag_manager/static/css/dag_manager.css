@@ -169,19 +169,36 @@
     display: block;
 }
 
-.file-list-item, .folder-list-item {
+/* ✅ Улучшенные стили для папок и файлов */
+.file-list-item,
+.folder-list-item {
     padding: 15px;
     border-bottom: 1px solid #dee2e6;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    transition: all 0.2s ease;
+    cursor: pointer;
 }
 
-.file-list-item:hover, .folder-list-item:hover {
-    background: #f8f9fa;
+/* ✅ Hover эффект для папок (синий) */
+.folder-list-item:hover {
+    background: #e3f2fd;
+    border-left: 4px solid #007bff;
+    padding-left: 11px; /* Компенсация border-left */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-.file-icon, .folder-icon-large {
+/* ✅ Hover эффект для файлов (зеленый) */
+.file-list-item:hover {
+    background: #e8f5e9;
+    border-left: 4px solid #28a745;
+    padding-left: 11px; /* Компенсация border-left */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.file-icon,
+.folder-icon-large {
     margin-right: 12px;
     font-size: 20px;
 }
@@ -198,7 +215,6 @@
     align-items: center;
     flex: 1;
     min-width: 0;
-    cursor: pointer;
 }
 
 .file-meta {
@@ -409,6 +425,7 @@
     display: block;
 }
 
+/* File Editor */
 .file-editor-container {
     display: flex;
     flex-direction: column;
