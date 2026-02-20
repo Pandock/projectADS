@@ -50,6 +50,10 @@ class SecurityValidator:
             return False
 
     def is_filename_safe(self, filename: str) -> bool:
+
+        if not filename or len(filename) > 100:
+            return False
+
         if not filename or filename in ['.', '..']:
             return False
 
