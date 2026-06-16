@@ -1,0 +1,784 @@
+{
+  "__inputs": [
+    {
+      "name": "datasource_prom",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    },
+    {
+      "name": "datasource_pg",
+      "label": "PostgreSQL (CMDB)",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "postgres",
+      "pluginName": "PostgreSQL"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "text",
+      "name": "Text",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Service Availability — динамический дашборд на основе CMDB (PostgreSQL) + Prometheus. Таблицы с итоговой строкой.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "id": 10,
+      "title": "System Units",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 11,
+      "title": "System Units — доступность сервисов",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "${datasource_pg}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "${datasource_pg}"
+          },
+          "rawSql": "SELECT\n  \"Компонент\",\n  \"сервер\",\n  \"Наименование unit\"\nFROM cmdb.services\nWHERE\n  \"ИТ-система\" = '${it_system}'\n  AND \"Тип unit\" = 'system unit'\n  AND (\n    '${affects_users}' = 'Все'\n    OR \"Влияет на пользователей\" = '${affects_users}'\n  )\n  AND (\n    '${affects_core}' = 'Все'\n    OR \"Влияет на основную функциональность\" = '${affects_core}'\n  )\nORDER BY \"Компонент\", \"сервер\", \"Наименование unit\"",
+          "format": "table",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace(count_over_time((node_systemd_unit_state{instance=~\".+:10000\",state=\"active\"} == 1)[$__range:10s]) * 10,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "B",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace(count_over_time((node_systemd_unit_state{instance=~\".+:10000\",state=\"active\"} == 0)[$__range:10s]) * 10,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "C",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace((count_over_time((node_systemd_unit_state{instance=~\".+:10000\",state=\"active\"} == 1)[$__range:10s]) / count_over_time(node_systemd_unit_state{instance=~\".+:10000\",state=\"active\"}[$__range:10s])) * 100,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "D",
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #B",
+            "renamePattern": "Доступность (s)"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #C",
+            "renamePattern": "Даунтайм (s)"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #D",
+            "renamePattern": "Доступность (%)"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "state": true,
+              "device": true,
+              "fstype": true,
+              "server": true
+            },
+            "indexByName": {
+              "Компонент": 0,
+              "сервер": 1,
+              "Наименование unit": 2,
+              "Доступность (s)": 3,
+              "Даунтайм (s)": 4,
+              "Доступность (%)": 5
+            },
+            "renameByName": {
+              "name": "Наименование unit",
+              "mountpoint": "Наименование unit"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": true,
+          "reducer": [
+            "mean"
+          ],
+          "fields": [
+            "Доступность (s)",
+            "Даунтайм (s)",
+            "Доступность (%)"
+          ],
+          "enablePagination": false,
+          "countRows": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Доступность (%)",
+            "desc": false
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Доступность (%)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 95
+                    },
+                    {
+                      "color": "green",
+                      "value": 99
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Доступность (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Даунтайм (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 300
+                    },
+                    {
+                      "color": "red",
+                      "value": 3600
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "pluginVersion": "10.0.0"
+    },
+    {
+      "type": "row",
+      "id": 20,
+      "title": "HTTP Checks — заглушка (будет добавлено позже)",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": true,
+      "panels": [
+        {
+          "type": "text",
+          "id": 21,
+          "title": "HTTP — Coming soon",
+          "gridPos": {
+            "x": 0,
+            "y": 12,
+            "w": 24,
+            "h": 3
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "## HTTP-проверки\n\nБудет реализовано на следующем этапе.\n\nПланируется использование метрик `probe_success` (Blackbox Exporter)."
+          },
+          "pluginVersion": "10.0.0"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 30,
+      "title": "Disk Space",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 31,
+      "title": "Disk Space — доступность точек монтирования",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "${datasource_pg}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "${datasource_pg}"
+          },
+          "rawSql": "SELECT\n  \"Компонент\",\n  \"сервер\",\n  \"Наименование unit\"\nFROM cmdb.services\nWHERE\n  \"ИТ-система\" = '${it_system}'\n  AND \"Тип unit\" = 'disk space'\n  AND (\n    '${affects_users}' = 'Все'\n    OR \"Влияет на пользователей\" = '${affects_users}'\n  )\n  AND (\n    '${affects_core}' = 'Все'\n    OR \"Влияет на основную функциональность\" = '${affects_core}'\n  )\nORDER BY \"Компонент\", \"сервер\", \"Наименование unit\"",
+          "format": "table",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace(count_over_time(((node_filesystem_size_bytes{instance=~\".+:10000\"} - node_filesystem_avail_bytes{instance=~\".+:10000\"}) / node_filesystem_size_bytes{instance=~\".+:10000\"} * 100 < bool ${disk_threshold})[$__range:10s]) * 10,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "B",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace(count_over_time(((node_filesystem_size_bytes{instance=~\".+:10000\"} - node_filesystem_avail_bytes{instance=~\".+:10000\"}) / node_filesystem_size_bytes{instance=~\".+:10000\"} * 100 >= bool ${disk_threshold})[$__range:10s]) * 10,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "C",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource_prom}"
+          },
+          "expr": "label_replace((count_over_time(((node_filesystem_size_bytes{instance=~\".+:10000\"} - node_filesystem_avail_bytes{instance=~\".+:10000\"}) / node_filesystem_size_bytes{instance=~\".+:10000\"} * 100 < bool ${disk_threshold})[$__range:10s]) / count_over_time(node_filesystem_size_bytes{instance=~\".+:10000\"}[$__range:10s])) * 100,\"server\",\"$1\",\"instance\",\"(.+):.+\")",
+          "instant": true,
+          "format": "table",
+          "refId": "D",
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #B",
+            "renamePattern": "Доступность (s)"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #C",
+            "renamePattern": "Даунтайм (s)"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Value #D",
+            "renamePattern": "Доступность (%)"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "state": true,
+              "device": true,
+              "fstype": true,
+              "server": true
+            },
+            "indexByName": {
+              "Компонент": 0,
+              "сервер": 1,
+              "Наименование unit": 2,
+              "Доступность (s)": 3,
+              "Даунтайм (s)": 4,
+              "Доступность (%)": 5
+            },
+            "renameByName": {
+              "name": "Наименование unit",
+              "mountpoint": "Наименование unit"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": true,
+          "reducer": [
+            "mean"
+          ],
+          "fields": [
+            "Доступность (s)",
+            "Даунтайм (s)",
+            "Доступность (%)"
+          ],
+          "enablePagination": false,
+          "countRows": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Доступность (%)",
+            "desc": false
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Доступность (%)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 95
+                    },
+                    {
+                      "color": "green",
+                      "value": 99
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Доступность (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Даунтайм (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 300
+                    },
+                    {
+                      "color": "red",
+                      "value": 3600
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "pluginVersion": "10.0.0"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "availability",
+    "systemd",
+    "disk",
+    "cmdb",
+    "dynamic",
+    "table"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "datasource_prom",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "PostgreSQL (CMDB)",
+        "multi": false,
+        "name": "datasource_pg",
+        "options": [],
+        "query": "postgres",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "Airflow - ДП ГПН - Интеграция данных",
+          "value": "Airflow - ДП ГПН - Интеграция данных"
+        },
+        "description": "ЗАГЛУШКА — замените на type=query с SQL из README (PLACEHOLDER_IT_SYSTEM_QUERY)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "ИТ-система",
+        "multi": false,
+        "name": "it_system",
+        "options": [
+          {
+            "selected": true,
+            "text": "Airflow - ДП ГПН - Интеграция данных",
+            "value": "Airflow - ДП ГПН - Интеграция данных"
+          }
+        ],
+        "query": "Airflow - ДП ГПН - Интеграция данных",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "Все",
+          "value": "Все"
+        },
+        "description": "Фильтр: Влияет на пользователей",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Влияет на пользователей",
+        "multi": false,
+        "name": "affects_users",
+        "options": [
+          {
+            "selected": true,
+            "text": "Все",
+            "value": "Все"
+          },
+          {
+            "selected": false,
+            "text": "Да",
+            "value": "Да"
+          },
+          {
+            "selected": false,
+            "text": "Нет",
+            "value": "Нет"
+          }
+        ],
+        "query": "Все,Да,Нет",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "Все",
+          "value": "Все"
+        },
+        "description": "Фильтр: Влияет на основную функциональность",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Влияет на осн. функциональность",
+        "multi": false,
+        "name": "affects_core",
+        "options": [
+          {
+            "selected": true,
+            "text": "Все",
+            "value": "Все"
+          },
+          {
+            "selected": false,
+            "text": "Да",
+            "value": "Да"
+          },
+          {
+            "selected": false,
+            "text": "Нет",
+            "value": "Нет"
+          }
+        ],
+        "query": "Все,Да,Нет",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "90",
+          "value": "90"
+        },
+        "description": "Порог заполненности диска (%)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Disk threshold (%)",
+        "multi": false,
+        "name": "disk_threshold",
+        "options": [
+          {
+            "selected": true,
+            "text": "90",
+            "value": "90"
+          }
+        ],
+        "query": "90",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Service Availability — Dynamic Table (CMDB)",
+  "uid": "service-availability-table-v2",
+  "version": 2,
+  "weekStart": ""
+}
